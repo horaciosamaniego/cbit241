@@ -1,8 +1,11 @@
 ---
-title: "Ayu1"
-author: "Joseba Iribarren"
+title: "Nociones básicas de geoestadística y dependencia espacial"
+author: "Joseba Iribarren (joseba.iribarren@alumnos.uach.cl )"
 date: "2025-03-14"
-output: pdf_document
+output: 
+  html_document:
+    toc: true
+    theme: united
 ---
 
 # AYUDANTÍA 1: Dependencia espacial
@@ -19,7 +22,7 @@ knitr::opts_chunk$set(echo = TRUE)
 
 ### 0) Paquetes y working directory
 
-```{r}
+```{r librerias a usar, warning=FALSE, include=FALSE}
 require(pacman)
 pacman::p_load(tidyverse, # para manejo de datos
                plotly, #mapa interactivo para ggplot
@@ -35,7 +38,7 @@ pacman::p_load(tidyverse, # para manejo de datos
 
 ### 1) Cargar capas
 
-```{r}
+```{r leer coberturas}
 # Ver las capas de mi archivo geopackage
 st_layers("datosAyu1.gpkg")
 
@@ -52,24 +55,24 @@ arcilla <- rast('Arcilla5_15LosRios.tif')
 ```
 
 ### 2) Visualizar capas
-
-```{r}
+(parece que hay una dificultad con la ubicación de los titulos)
+```{r ver coberturas}
 map1 <- ggplot() +
   geom_sf(data = losRios, fill = 'white') +
   geom_sf(data = aleatorios, color = 'green') +
-  ggtitle(title = 'Indiferencia') +
+  # ggtitle(title = 'Indiferencia') + # by horo
   theme_void()
 
 map2 <- ggplot() +
   geom_sf(data = losRios, fill = 'white') +
   geom_sf(data = agrupados, color = 'yellow') +
-  ggtitle(title = 'Atracción') +
+  # ggtitle(title = 'Atracción') +
   theme_void()
 
 map3 <- ggplot() +
   geom_sf(data = losRios, fill = 'white') +
   geom_sf(data = uniforme, color = 'red') +
-  ggtitle(title = 'Repulsión') +
+  # ggtitle(title = 'Repulsión') +
   theme_void()
 
 grid.arrange(map1, map2, map3, ncol = 1)
@@ -84,12 +87,12 @@ Cuando vemos patrones espaciales en la naturaleza siempre tenemos que preguntarn
 
 Hagamos zoom en el siguiente mapa para descubrirlo\
 
-```{r}
+```{r mapa simple}
 # Mapa interactivo 1
 ggplotly(map2)
 ```
 
-```{r}
+```{r mapa interactivo}
 # Mapa interactivo 2
 leaflet() %>%
   addTiles() %>% 
@@ -105,7 +108,7 @@ Conceptualmente, la implementación de la función K de Ripley, K(t), implica ce
 
 Aleatorio:
 
-```{r}
+```{r ploteo aleatorio}
 # Trasformar objeto sf en ppp
 ventana_aleatorios <- as.owin(st_bbox(aleatorios))
 coords <- st_coordinates(aleatorios)
@@ -119,7 +122,7 @@ plot(KAleatorio, main="Función K para puntos aleatorios")
 
 "Agrupados":
 
-```{r}
+```{r ploteo agrupado}
 # Trasformar objeto sf en ppp
 ventana_agrupados <- as.owin(st_bbox(agrupados))
 coords <- st_coordinates(agrupados)
@@ -133,7 +136,7 @@ plot(KAgrupados, main="Función K para puntos agrupados")
 
 Regulares:
 
-```{r}
+```{r ploteo regular}
 # Trasformar objeto sf en ppp
 ventana_uniforme <- as.owin(st_bbox(uniforme))
 coords <- st_coordinates(uniforme)
@@ -148,7 +151,7 @@ plot(KUniforme, main="Función K para puntos uniformes")
 ### 4) L(r)
 Podemos generar una correción para facilitar la compara el K obtenido (Kˆ(t)) con el K estadisticamente esperado (K(t)), con lo que llamamos la función L (L(t)).
 
-```{r}
+```{r correccion K-Ripley}
 LAleatorio <- sqrt(KAleatorio/pi)
 plot(LAleatorio, ylab="L(r)", main="Función L para puntos aleatorios")
 
