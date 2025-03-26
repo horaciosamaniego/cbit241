@@ -33,7 +33,8 @@ pacman::p_load(tidyverse, # para manejo de datos
                leaflet, # para hacer mapas dinamicos
                spatstat, # calculo K de Ripley
                spdep, # autocorrelograma
-               ncf) # spline correlation
+               ncf, # spline correlation
+               geostats) # semivarigrama
 
 setwd(dirname(rstudioapi::getActiveDocumentContext()$path)) ##Cambiar de ser necesario
 
@@ -253,7 +254,7 @@ ggplot(moran_I, aes(x = distance/1000, y = moran)) +
 Existen otras maneras de evaluar la autocorrelación espacial, una de ellas es hacer un 'spline correlogram'. El cual se basa en usar un spline de suavización para estimar la relación continua entre la distancia y los valores. A diferencia de otros metodos como Moran I, en donde los intervalos de distancia son discretos.\
 
 ```{r}
-aleatorios_sample <- aleatorios %>% sample_n(100)
+aleatorios_sample <- aleatorios #%>% sample_n(100)
 
 corrds <- st_coordinates(aleatorios_sample)
 spline_corr <- spline.correlog(x = corrds[,1], 
@@ -261,19 +262,49 @@ spline_corr <- spline.correlog(x = corrds[,1],
                                z = aleatorios_sample$porcentajeArcilla, 
                                df = 15)
 
-# Plot the correlogram
 plot(spline_corr)
 ```
 
 # Parte 3: Semivariograma
 
-```{r}
+El semivariograma es una herramient ocupada para ver como cambia la variabilidad espacial con la distancia. Y se calcula mediante la mitad de la diferencia cuadrática media entre puntos separados por una distancia.
 
+![](imagenes/formula.png)
+![](imagenes/esquema.png)
+*Nugget:* es el valor de la semivarianza en h = 0 (es decir, en la intersección con el eje y). Aunque en teoría debería ser cero, la intersección suele ser mayor que cero en la práctica, debido a la presencia de heterogeneidad de microescala que no hemos medido (nuestra granularidad de muestreo es demasiado grande) o debido al muestreo o errores de medición resultantes de diferencias entre observadores (sesgo del observador), errores de instrumentación, etc. (Fortin y Dale, 2005).\
+
+*Rango:* es la distancia (h) a lo largo de la cual la variable medida está autocorrelacionada espacialmente. El rango se identifica por el punto donde los valores de semivarianza comienzan a estabilizarse (es decir, el Sill).\
+
+*Sill:* se refiere a la parte del variograma donde la semivarianza se estabiliza y forma una meseta. En este dominio, la distancia ya no afecta la estructura espacial de los datos (es decir, los datos son espacialmente independientes). Sin embargo, no todos los patrones espaciales tienen un Sill o umbral.\
+
+```{r}
+aleatorios_sv <- geostats::semivariogram(x = corrds[,1], 
+              y = corrds[,2],
+              z = aleatorios_sample$porcentajeArcilla,
+              plot = F,
+              nb = 13)
+
+aleatorios_sv_df <- tibble(dist_km = aleatorios_sv$h/1000,
+                           sv = aleatorios_sv$sv)
+
+ggplot(aleatorios_sv_df, aes(x = dist_km, y = sv)) +
+  geom_point() +
+  geom_smooth(method= 'lm', formula = 'y ~ poly(x, 2)', se = F) +
+  geom_text(aes(x = max(dist_km), y = min(sv)),
+            label = paste0('Nugget: ', aleatorios_sv$snr[2] %>% round(2),
+                           '\nSill: ', aleatorios_sv$snr[1] %>% round(2),
+                           '\nRange: ', (aleatorios_sv$snr[3]/1000) %>% round(2)),
+            hjust = 1, vjust = 0,
+            size = 5) +
+  labs(x = 'Distancia [Km]',
+       y = 'Semivarianza [%^2]',
+       title = 'Semivariograma') +
+  theme_minimal()
 ```
 
 
 # Tarea
 
-1)  Calcule el K de Ripley y haga un análisis de sensibilidad de Moran I en base a la distancia, eligiendo para esto una de las capas de puntos y un ráster de la sección tarea.\
+1)  Calcule el K de Ripley, haga un autocorrelograma con spline y realice un semivariograma, eligiendo para esto una de las capas de puntos y un ráster de la sección tarea.\
 
-2)  Adicionalmente, sin el uso de mapas, describa cómo se distribuyen los puntos a distintas escalas y en qué punto, aproximadamente se pierde la autocorrelación espacial.\
+2)  Adicionalmente, sin el uso de mapas, y en base a los analisis anteriores, describa cómo se distribuyen los puntos a distintas escalas y en qué punto, aproximadamente se pierde la autocorrelación espacial.\
