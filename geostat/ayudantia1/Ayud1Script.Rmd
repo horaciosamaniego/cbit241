@@ -23,7 +23,7 @@ knitr::opts_chunk$set(
 
 ### 0) Paquetes y working directory
 
-```{r}
+```{r warning=FALSE}
 require(pacman)
 pacman::p_load(tidyverse, # para manejo de datos
                plotly, #mapa interactivo para ggplot
@@ -36,6 +36,7 @@ pacman::p_load(tidyverse, # para manejo de datos
                ncf) # spline correlation
 
 setwd(dirname(rstudioapi::getActiveDocumentContext()$path)) ##Cambiar de ser necesario
+
 ```
 
 ### 1) Cargar capas
@@ -157,10 +158,14 @@ Podemos generar una correción para facilitar la compara el K obtenido (Kˆ(t)) 
 ```{r}
 LAleatorio <- sqrt(KAleatorio/pi)
 plot(LAleatorio, ylab="L(r)", main="Función L para puntos aleatorios")
+```
 
-LAgrupados <- sqrt(KAleatorio/pi)
+```{r}
+LAgrupados <- sqrt(KAgrupados/pi)
 plot(LAgrupados, ylab="L(r)", main="Función L para puntos agrupados")
+```
 
+```{r}
 LUniformes <- sqrt(KUniforme/pi)
 plot(LUniformes, ylab="L(r)", main="Función L para puntos uniformes")
 ```
@@ -179,7 +184,7 @@ ggplot(LAleatorio_df) +
   theme_minimal()
 ```
 
-## Parte 2: Autocorrelograma
+# Parte 2: Autocorrelograma
 
 ```{r}
 # Borrar todo excepto las capas
@@ -260,7 +265,14 @@ spline_corr <- spline.correlog(x = corrds[,1],
 plot(spline_corr)
 ```
 
-# Tarea 
+# Parte 3: Semivariograma
+
+```{r}
+
+```
+
+
+# Tarea
 
 1)  Calcule el K de Ripley y haga un análisis de sensibilidad de Moran I en base a la distancia, eligiendo para esto una de las capas de puntos y un ráster de la sección tarea.\
 
