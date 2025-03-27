@@ -304,8 +304,12 @@ ggplot(aleatorios_sv_df, aes(x = dist_km, y = sv)) +
   theme_minimal()
 ```
 
-# Tarea
+# Tarea -- grupos de no mas de 3 estudiantes
 
-1)  Calcule el K de Ripley, haga un autocorrelograma con spline y realice un semivariograma, eligiendo para esto una de las capas de puntos y un ráster de la sección tarea.\
+(Será presentada en clases)
 
-2)  Adicionalmente, sin el uso de mapas, y en base a los análisis anteriores, describa cómo se distribuyen los puntos a distintas escalas y en qué punto (unidades de distancia), aproximadamente se pierde la autocorrelación espacial.\
+1.  Calcule el K de Ripley, haga un autocorrelograma con spline y realice un semivariograma, eligiendo para esto una de las capas de puntos y un ráster de la sección tarea.\
+
+2. Investiga cuál es la diferencia entre el semivariograma empírico y el modelado. Prepara una mini presentación con 2 semivariograma modelos como ejemplo.
+
+3.  Adicionalmente, sin el uso de mapas, y en base a los análisis anteriores, describa cómo se distribuyen los puntos a distintas escalas y en qué punto (unidades de distancia), aproximadamente se pierde la autocorrelación espacial.\
