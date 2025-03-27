@@ -1,8 +1,8 @@
 ---
-title: "Ayu1"
-author: "Joseba Iribarren"
+title: "Nociones básicas de geoestadística y dependencia espacial"
+author: "Joseba Iribarren (joseba.iribarren@alumnos.uach.cl )"
 date: "2025-03-14"
-output: pdf_document
+output: html_document
 ---
 
 # AYUDANTÍA 1: Dependencia espacial
