@@ -1,0 +1,378 @@
+---
+title: "AYUDANTÍA 2: Métricas del paisaje"
+author: "Joseba Iribarren <josebairibarren@gmail.com>"
+date: "2025-03-14"
+output: html_document
+---
+
+# AYUDANTÍA 2: Métricas del paisaje 
+
+En esta ayudantía veremos qué son las métricas del paisaje, los tipos de métricas existentes y las escalas a las que estas se pueden aplicar (parche, clase y paisaje).\
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+	echo = TRUE,
+	message = FALSE,
+	warning = FALSE
+)
+```
+
+### Paquetes y working directory 
+
+```{r 2, warning=FALSE}
+require(pacman)
+pacman::p_load(tidyverse, # para manejo de datos
+               sf, # para trabajar con datos vectoriales
+               terra, # para trabajar con datos raster
+               raster,
+               leaflet, # para hacer mapas dinamicos
+               latex2exp, #LaTeX
+               googledrive,
+               landscapemetric) # metricas del paisaje
+
+setwd(dirname(rstudioapi::getActiveDocumentContext()$path)) ##Cambiar de ser necesario
+
+```
+
+En este trabajo exploraremos cómo es posible medir métricas del paisaje en base a dos definiciones de paisaje. Estas son: el Mapa de Cobertura de Suelos de Chile 2014, un trabajo conjunto entre el GEP y el CFCN, y el Catastro Vegetacional de Chile, de CONAF. Aunque existen muchas otras maneras de definir nuestro paisaje.\
+
+Por otra parte, nuestra extensión de análisis estará dada por los límites administrativos de la comuna de San Pedro de Atacama, en la cual se espera hacer una caracterización del paisaje, explicando las principales categorías de métricas y los niveles a los cuales se aplican.\
+
+### PARTE 1: Cargar capas 
+
+```{r 3}
+# Ver capas contenidas en el geopackage
+st_layers("capasAyu/Ayu2.gpkg")
+
+# Leer capas
+# Comuna
+SP <- st_read("capasAyu/Ayu2.gpkg", layer = 'SanPedroAtacama', quiet=TRUE)
+# Catastro Vegatacional
+CVeg <- st_read("capasAyu/Ayu2.gpkg", layer = 'CatastroVeg_disuelto', quiet=TRUE)
+#Land Cover 2014
+LC <- rast("capasAyu/LC_2014_Atacama.tif")
+
+# ver crs de cada capa
+cat(paste0("La capa SP tiene coordenadas en: EPSG", st_crs(SP)$epsg,
+    "\nLa capa CVeg tiene coordenadas en: EPSG", st_crs(CVeg)$epsg,
+    "\nLa capa LC tiene coordenadas en: EPSG", st_crs(crs(LC))$epsg))
+
+# ver valides
+cat(paste0("La capa SP es valida? ", st_is_valid(SP),
+       "\nLa capa CVeg es valida? ", all(st_is_valid(CVeg))))
+```
+
+Corregir geometrias invalidas y cambiar sistema de coordenadas
+
+```{r 4}
+# En caso que hubiera una capa con geometrias invalidad se pueden validar con st_make_valid
+#CVeg <- st_make_valid(CVeg)
+
+# Para este caso no es necesario porque ambas capas estan en epsg 4326
+CVeg <- st_transform(CVeg, crs = 32719)
+SP <- st_transform(SP, crs = 32719)
+```
+
+Cortar capas en base a una capa de poligonos
+
+```{r 5}
+# # Para esta ayudantia las capas ya fueron cortadas, por lo que nos saltamos esta parte
+
+# # Intersección entre capas
+# CVeg <- st_intersection(CVeg, SP)
+# 
+# # Cortar raster por capa de mascara
+# LC <- crop(LC, SP)
+# LC <- mask(LC, SP)
+```
+
+### PARTE 2: Trabajando con Land Cover 2014 
+
+Ahora vamos a ver qué clases de uso existen en la comuna de San Pedro de Atacama. Ver equivalencia en la [documentación](http://www.gep.uchile.cl/Landcover/Landcover%20de%20Chile%20-%20Descripci%C3%B3n%20del%20Producto%20-%20GEP%20UCHILE%202016.pdf).\
+
+Según el documento, los valores del ráster representan una categoría compuesta por tres números: el primero corresponde a una categoría de nivel 1, seguido por una categoría de nivel 2, y finalmente una categoría de nivel 3.\
+
+```{r 6}
+# Valores unicos en el raster
+print(unique(LC))
+
+# Cantidad de categorias
+print(length(unique(values(LC))))
+```
+
+Para este practico simpleficaremos el raster para que solo mantenga las categorias de nivel 1.
+
+```{r 8}
+# Categorias de nivel 1
+clases_usos <- c("Cultivos", "Bosque Nativo", "Plantaciones", "Pastizales", "Matorrales", "Humedales", "Cuerpos de Agua", "Superficies Impermeables","Tierras Desnudas" ,"Otros") 
+
+# vector para la reclasificacion
+reclass <- c(
+  -Inf,1,NaN, #0
+  100, 151, 0, #1 Cultivos
+  200, 233, 1, #2 Bosque Nativo
+  240, 253, 2, #3 Plantación
+  300, 331, 3, #4 Pastizales
+  400, 451, 4, #5 Matorrales
+  500, 531, 5, #6 Humedales
+  600, 641, 6, #7 Cuerpos de Agua
+  799, 801, 7, #8 Superficies Impermeables
+  900, 933, 8, #9 Tierras Desnudas
+  1000, 1211, 9) #10 Otros
+
+# trasformar el vector a una matriz
+reclass_m <- matrix(reclass, ncol=3, byrow=TRUE)
+
+# reclasificar
+LC2 <- terra::classify(LC, reclass_m, right = TRUE, others = NaN)
+```
+
+Veamos esta vez la cobertura, pero por categorias de nivel 1
+
+```{r 9}
+# hacer data frame de ids y su significado
+id_cl <- sort(unique(values(LC2)))
+clases_usos <- clases_usos[1:length(id_cl)]
+LU <- data.frame(id = as.factor(id_cl), Usos = clases_usos)
+
+# hacer data frame de hectareas y pixeles por id
+has <-   data.frame(table(values(LC2))*900/10000)
+npix <-  data.frame(table(values(LC2)))
+df <- data.frame(id=has$Var1, Hectáreas=has$Freq, Pixeles=npix$Freq)
+
+# Juntar los data frames por el id y agregar porcentaje
+LU <- LU %>% left_join(df, by = "id") %>% 
+  mutate(porcentaje = Pixeles / sum(Pixeles) * 100)
+
+# ver df
+print(LU)
+```
+
+Si bien ya conocemos la cantidad y cuáles son los usos de suelo en la comuna de San Pedro de Atacama, es más informativo visualizar la frecuencia de cada uso mediante un gráfico de barras.
+
+```{r 7 warning=FALSE}
+barplot(LC2,main='Número de pixeles por clase',horiz=TRUE,las=1)
+```
+
+Luego, vamos a visualizar el raster reclasificado.
+
+```{r 10}
+colores <- c("green", 'darkgreen', "red", 'yellow', 'brown', 'lightblue','blue', 'gray', 'coral', 'black')
+
+plot(LC2, type="classes", col = colores, main = "San Pedro Atacama", 
+     axes=F, mar=c(1,1,2,6), legend=T)
+```
+
+Para aplicar el cálculo de métricas de paisajes, necesitamos que el tamaño de las celdas del archivo raster sean iguales (en alto y ancho). Desafortunadamente, algo sucede en el archivo original que deja las celdas levemente desigual. Si tipiamos el comando `> res(Usos2)` vamos a ver que la resolución es de `30.00002, 29.99993  (x, y)`. Si, eso está en unidades de metros, por lo que la diferencia es milimétrica! Lo vamos a corregir.
+
+Para corregir eso, usaremos el comando `warp()`. Lo haremos en 2 pasos: 1) Generamos un raster *vacío* de las mismas dimensiones, proyección y con resolución de 30m; y luego, 2) "Resampleamos". Es decir vamos a remuestrear este nuevo raster con los valores de archivo original.
+
+```{r 11}
+# Generamos nuevo raster vacio con solo NAs
+tmp <- terra::rast(nrows=dim(LC2)[1], ncols=dim(LC2)[2], nlyrs=1, xmin=ext(LC2)[1], xmax=ext(LC2)[2], ymin=ext(LC2)[3],ymax=ext(LC2)[4], crs = crs(LC2), resolution=30.0000000, vals=NA)
+# Remuestreamos con raster original
+LC2_pixelCuadrado <- resample(LC2,tmp,method="min")
+LC2_pixelCuadrado
+```
+
+### PARTE 3: Trabajando con Catastro Vegetacional
+
+Ver usos del catastro vegetacional
+
+```{r 12}
+# ver estructura de la capa
+CVeg %>% glimpse()
+
+# ver usos
+CVeg$ID_USO %>% unique()
+CVeg$USO %>% unique()
+
+# calcular área en ha por parche
+CVeg$area_ha <- st_area(CVeg)/10000
+
+# ver composición del paisaje
+tabla_categorias <- CVeg %>% 
+  as.data.frame() %>%
+  dplyr::select(-geom) %>% 
+  group_by(ID_USO, USO) %>% 
+  summarise(area_total_ha = sum(area_ha)) %>% 
+  ungroup() %>% 
+  mutate(porcentaje = area_total_ha / sum(area_total_ha) * 100)
+
+print(tabla_categorias)
+```
+
+Rasterizar capa por ID
+
+Al ser este proceso es muy demoroso para la ayudantia, se entregara la capa ya rasterizada. Pero, aun asi, el siguiente chunk muestra como fue realizada dicha capa.
+
+```{r 13}
+# # trasformar a un vector del paquete terra, cambiando el crs a UTM para generar el raster en metros
+# CVeg_terra <- vect(CVeg)
+# 
+# # Crear un raster vacio
+# template <- terra::rast(ext(CVeg_terra), resolution = 90, crs = crs(CVeg_terra))
+# 
+# # Rasterizar usando el atributo de id de uso del suelo (debe ser numerico)
+# CVeg_rast <- terra::rasterize(CVeg_terra, template, field = "USO", fun = "min")
+# 
+# # El proceso no genera pexelesde exactamente 90x90. Para esto repetimos el proceso visco con el primer raster. Generamos nuevo raster vacio con solo NAs y se asignamos valores.
+# tmp <- terra::rast(nrows=dim(CVeg_rast)[1], ncols=dim(CVeg_rast)[2], nlyrs=1, xmin=ext(CVeg_rast)[1], xmax=ext(CVeg_rast)[2], ymin=ext(CVeg_rast)[3],ymax=ext(CVeg_rast)[4], crs = crs(LC2), resolution=90.0000000, vals=NA)
+# 
+# # Remuestreamos con raster original
+# CVeg_pixelCuadrado <- resample(CVeg_rast,tmp,method="min")
+# res(CVeg_pixelCuadrado)
+# 
+# # guardar
+# writeRaster(CVeg_pixelCuadrado, 'capasAyu/CVeg_pixelCuadrado.tif', overwrite=TRUE)
+```
+
+Visualizar Raster:
+
+Cabe destacar que, debido al proceso de rasterización, han cambiado los valores de las categorías, asignándolos en orden alfabético. De esta manera, la primera categoría, con valor 0, corresponde a bosques, y la última, con valor 6, a las áreas urbanas (consideradas últimas debido al acento).
+
+Al ver el mapa, nos damos cuenta de que esta categorización reconoce una mayor variabilidad del terreno, destacando una alta cantidad de humedales (bofedales) y áreas de pastizales y matorrales, además de ser capaz de distinguir zonas urbanas e industriales.
+
+```{r 14}
+# Cargar raster
+CVeg_pixelCuadrado <- rast('capasAyu/CVeg_pixelCuadrado.tif')
+
+# Asignar niveles a los valores
+cats <- data.frame(ID=0:6, 
+                   Categoria=c("Bosques", #0
+                               "Cuerpos de Agua", #1
+                               'Humedales', #2
+                               'Praderas y Matorrales',#3
+                               "Terrenos Agrícolas", #4
+                               "Áreas Desprovistas de Vegetación", #5
+                               'Áreas Urbanas e Industriales')) #6
+
+# Asignar la tabla de categorías al raster
+levels(CVeg_pixelCuadrado) <- cats
+
+colores <- c('darkgreen', 'blue', 'green', "brown", "lightgreen", 'yellow', 'gray')
+plot(CVeg_pixelCuadrado, col = colores)
+```
+
+Mapa Interactivo
+
+```{r 15}
+# Mapa interactivo
+leaflet() %>%
+  addTiles() %>%
+  addRasterImage(CVeg_pixelCuadrado, colors = colores, opacity = 1)
+```
+
+Veamos más de cerca el terreno. Si nos hacercamos, podremos ver una heterogenidad oculta a primera vista, encontrando pequeños sectores donde la vida vegetal prospera.
+
+```{r 16}
+leaflet() %>%
+  addTiles() %>%
+  addTiles(
+    urlTemplate = "https://mt1.google.com/vt/lyrs=s&x={x}&y={y}&z={z}",
+    attribution = '© Google'
+  ) %>% 
+  addPolygons(data = st_transform(SP, crs = 4326), fill = FALSE)
+```
+
+### PARTE 4: Calculo de Métricas 
+
+Primero borremos elementos no relevantes\
+
+```{r 17}
+# Brramos todo menos los nombrados
+rm(list = setdiff(ls(), c('SP', 'CVeg_pixelCuadrado', 'LC2_pixelCuadrado')))
+```
+
+Para esta ayudantia usaremos la librería descrita en la siguiente publicación:
+
+-   Hesselbarth, M.H.K., Sciaini, M., With, K.A., Wiegand, K., Nowosad, J. 2019. landscapemetrics: an open‐source R tool to calculate landscape metrics. Ecography, 42: 1648-1657 ([paper](https://sci-hub.se/10.1111/ecog.04617))
+
+Primero veamos si las capas son adecuadas para el uso de paquete `lansdcapemetrics`. [aquí](https://r-spatialecology.github.io/landscapemetrics/index.html), estas deben ser rasters de números enteros. Para eso debemos hacer unas correcciones mas.
+
+```{r 18 include=FALSE}
+# ver si son enteros
+unique(values(CVeg_pixelCuadrado)) 
+
+# En este caso si son numeros enteros, pero si necesitaramos hacerlos enteros podriamos con:
+#values(CVeg_rast) = as.integer(values(CVeg_rast))
+
+```
+
+Luego, la libreria (y el paper) nos indica que debemos validar el paisaje para la aplicación de métricas.
+
+```{r 20}
+landscapemetrics::check_landscape(CVeg_pixelCuadrado)
+```
+
+En la validación, nos entregan información básica del raster, si está proyectado, si las clases han sido codificadas con números enteros y el número de categorías que contiene. Aqui vemos que si debiera estar en condiciones para poder evaluar métricas.\
+
+### NIVEL DE PAISAJE 
+
+Ahora, podemos calcular todas las métricas disponibles para la zona de estudio a nivel de paisaje.\
+
+```{r 21}
+SanPedro_l <- calculate_lsm(CVeg_pixelCuadrado, level="landscape", full_name = TRUE)
+SanPedro_l %>% view()
+```
+
+¿Qué nos muestra la tabla?
+
+```{r 22}
+# Cuales son las funciones que se puden ver a nivel de paisaje?")
+SanPedro_l$name %>% unique()
+
+#Cuantas son?"
+SanPedro_l$name %>% unique() %>% length()
+
+#Que tipos de metricas existen?"
+SanPedro_l$type %>% unique()
+```
+
+Cabe destacar que muchas de estas metricas corresponden a la media o desviación estandar de caracteristicas de los parches. Por ejemplo, la media del tamaño de los parches.\
+
+Es posible ver la documentación de cada metrica en el siguiente [LINK](https://r-spatialecology.github.io/landscapemetrics/reference/index.html)\
+
+### NIVEL DE CLASE 
+
+Por otro lado, podemos preguntarnos también por la proporción del paisaje utilizada por cada clase. Recordemos que al evaluar métricas por clase, se produce una matriz de resultados que contiene una fila por clase. ¿Porqué hay 385 filas aquí?\
+
+```{r 23}
+SanPedro_c <- calculate_lsm(CVeg_pixelCuadrado,level="class",full_name = T)
+```
+
+```{r 24}
+SanPedro_c %>% view()
+```
+
+Pero *¿por qué son importantes las metricas del paisaje en este contexto?*
+
+El Altiplano chileno alberga ecosistemas únicos y especies adaptadas a condiciones extremas. Las métricas del paisaje (como la fragmentación, conectividad, diversidad de parches, etc.) ayudan a entender.\
+
+Si nos ponemos en el caso hipotetico, en el que estudiamos las poblaciones de flamencos que habitan los humedales de la zona. Tal vez nos interesa analizar las metricas de estos parches.\
+
+### NIVEL DE PARCHE 
+
+Por ejemplo podriamos calcular el vecino más cercano de cada parque, y su suponemos que los flamencos tienen una movilidad de 10 km (linea rosada en el histograma), veriamos que para ellos, su habitad se encuentra completamente conectado.\
+
+Sin embargo, si analizamos una especie con menor movilidad, por ejemplo, una lagartija, que digamos que puede moverse 1 km fuera de los humedales (linea verde). Entonces veriamos que existen bastantes parches que son completamente inacesibles.\
+
+```{r}
+SanPedro_p_enn <- calculate_lsm(CVeg_pixelCuadrado,level="patch",full_name = T, metric = "enn")
+
+SanPedro_p_enn_humedal <-  SanPedro_p_enn %>% filter(class == 2)
+
+SanPedro_p_enn_humedal %>% 
+  ggplot(aes(x = value)) +
+  geom_histogram(binwidth = 500, fill = "steelblue", color = "black") +
+  geom_vline(xintercept = 1000, color = 'green', size = 1.5) +
+  geom_vline(xintercept = 10000, color = 'pink', size = 1.5) +
+  labs(title = "Distancia al parche más cercano (ENN)",
+       x = "Distancia (m)",
+       y = "Frecuencia") +
+  theme_minimal()
+```
+
+### INFORME
+
+Las intrucciones del informe y presentación de esta ayudantia estanran subidas a Notion, en la sección de practicos y reportes.
