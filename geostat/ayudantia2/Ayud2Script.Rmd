@@ -133,15 +133,17 @@ Veamos esta vez la cobertura, pero por categorias de nivel 1
 id_cl <- sort(unique(values(LC2)))
 clases_usos <- clases_usos[1:length(id_cl)]
 LU <- data.frame(id = as.factor(id_cl), Usos = clases_usos)
+print(LU)
 
 # hacer data frame de hectareas y pixeles por id
-has <-   data.frame(table(values(LC2))*900/10000)
+has <-   data.frame((table(values(LC2))*900/10000) %>% round(0))
 npix <-  data.frame(table(values(LC2)))
 df <- data.frame(id=has$Var1, Hectáreas=has$Freq, Pixeles=npix$Freq)
+print(df)
 
 # Juntar los data frames por el id y agregar porcentaje
 LU <- LU %>% left_join(df, by = "id") %>% 
-  mutate(porcentaje = Pixeles / sum(Pixeles) * 100)
+  mutate(porcentaje = (Pixeles / sum(Pixeles) * 100) %>% round(2))
 
 # ver df
 print(LU)
@@ -150,13 +152,15 @@ print(LU)
 Si bien ya conocemos la cantidad y cuáles son los usos de suelo en la comuna de San Pedro de Atacama, es más informativo visualizar la frecuencia de cada uso mediante un gráfico de barras.
 
 ```{r 7 warning=FALSE}
-barplot(LC2,main='Número de pixeles por clase',horiz=TRUE,las=1)
+barplot(LC2,main='Número de pixeles por clase',horiz=TRUE,las=1, names.arg = clases_usos)
 ```
 
 Luego, vamos a visualizar el raster reclasificado.
 
 ```{r 10}
 colores <- c("green", 'darkgreen', "red", 'yellow', 'brown', 'lightblue','blue', 'gray', 'coral', 'black')
+
+levels(LC2) = data.frame(value = c(0:9), desc = clases_usos)
 
 plot(LC2, type="classes", col = colores, main = "San Pedro Atacama", 
      axes=F, mar=c(1,1,2,6), legend=T)
