@@ -27,7 +27,6 @@ pacman::p_load(tidyverse, # para manejo de datos
                raster,
                leaflet, # para hacer mapas dinamicos
                latex2exp, #LaTeX
-               googledrive,
                landscapemetrics) # metricas del paisaje
 
 
@@ -48,12 +47,11 @@ Por otra parte, nuestra extensión de análisis estará dada por los límites ad
 ### PARTE 1: Cargar capas
 
 ```{r 3}
-
 # Leer capas
 # Comuna
-SP <- st_read('capasAyu/SanPedroAtacama.shp', quiet=TRUE)
+SP <- st_read('capasAyu/SanPedroAtacama.shp', quiet=F)
 # Catastro Vegatacional
-CVeg <- st_read('capasAyu/CatastroVeg_disuelto.shp', quiet=TRUE)
+CVeg <- st_read('capasAyu/CatastroVeg_disuelto.shp', quiet=F)
 #Land Cover 2014
 LC <- rast("capasAyu/LC_2014_Atacama.tif")
 
@@ -107,7 +105,7 @@ print(length(unique(values(LC))))
 
 Para este práctico simplificaremos el raster para que solo mantenga las categorías de nivel 1.
 
-```{r 8}
+```{r 7}
 # Categorias de nivel 1
 clases_usos <- c("Cultivos", "Bosque Nativo", "Plantaciones", "Pastizales", "Matorrales", "Humedales", "Cuerpos de Agua", "Superficies Impermeables","Tierras Desnudas" ,"Otros") 
 
@@ -134,7 +132,7 @@ LC2 <- terra::classify(LC, reclass_m, right = TRUE, others = NaN)
 
 Veamos la cobertura reclasificada
 
-```{r 9}
+```{r 8}
 # hacer data frame de ids y su significado
 id_cl <- sort(unique(values(LC2)))
 clases_usos <- clases_usos[1:length(id_cl)]
@@ -142,7 +140,7 @@ LU <- data.frame(id = as.factor(id_cl), Usos = clases_usos)
 print(LU)
 
 # hacer data frame de hectareas y pixeles por id
-has <-   data.frame((table(values(LC2))*900/10000) %>% round(0))
+has <-  data.frame((table(values(LC2))*900/10000) %>% round(0))
 npix <-  data.frame(table(values(LC2)))
 df <- data.frame(id=has$Var1, Hectáreas=has$Freq, Pixeles=npix$Freq)
 print(df)
@@ -157,7 +155,7 @@ print(LU)
 
 Si bien ya conocemos la cantidad y categorías de usos de suelo en la comuna de San Pedro de Atacama, es más informativo visualizar la frecuencia de cada uso mediante un gráfico de barras.
 
-```{r 7 warning=FALSE}
+```{r 9}
 barplot(LC2,main='Número de pixeles por clase',horiz=TRUE,las=1, names.arg = clases_usos)
 ```
 
@@ -172,7 +170,7 @@ plot(LC2, type="classes", col = colores, main = "San Pedro Atacama",
      axes=F, mar=c(1,1,2,6), legend=T)
 ```
 
-Para aplicar el cálculo de métricas de paisajes, necesitamos que el tamaño de las celdas del archivo raster sean iguales (en alto y ancho). Desafortunadamente, algo sucede en el archivo original que deja las celdas levemente desigual. Si tipiamos el comando `> res(Usos2)` vamos a ver que la resolución es de `30.00002, 29.99993  (x, y)`. Si, eso está en unidades de metros, por lo que la diferencia es milimétrica! Lo vamos a corregir.
+Para aplicar el cálculo de métricas de paisajes, necesitamos que el tamaño de las celdas del archivo raster sean iguales (en alto y ancho). Desafortunadamente, algo sucede en el archivo original que deja las celdas levemente desigual. Si tipiamos el comando `> res(LC2)` vamos a ver que la resolución es de `30.00002, 29.99993  (x, y)`. Si, eso está en unidades de metros, por lo que la diferencia es milimétrica! Lo vamos a corregir.
 
 Para corregir eso, usaremos el comando `warp()`. Lo haremos en 2 pasos: 1) Generamos un raster *vacío* de las mismas dimensiones, proyección y con resolución de 30m; y luego, 2) "Resampleamos". Es decir vamos a remuestrear este nuevo raster con los valores de archivo original.
 
@@ -221,10 +219,10 @@ CVeg_terra <- vect(CVeg)
 template <- terra::rast(ext(CVeg_terra), resolution = 90, crs = crs(CVeg_terra))
 
 # Rasterizar usando el atributo de id de uso del suelo (debe ser numerico)
-CVeg_rast <- terra::rasterize(CVeg_terra, template, field = "USO", fun = "min")
+CVeg_rast <- terra::rasterize(CVeg_terra, template, field = "USO")
 
 # El proceso no genera pixelesde exactamente de 90x90 m. Para esto repetimos el proceso visto con el primer raster. Generamos un nuevo raster vacio y generamos un resampleo de los valores del raster original.
-tmp <- terra::rast(nrows=dim(CVeg_rast)[1], ncols=dim(CVeg_rast)[2], nlyrs=1, xmin=ext(CVeg_rast)[1], xmax=ext(CVeg_rast)[2], ymin=ext(CVeg_rast)[3],ymax=ext(CVeg_rast)[4], crs = crs(LC2), resolution=90.0000000, vals=NA)
+tmp <- terra::rast(nrows=dim(CVeg_rast)[1], ncols=dim(CVeg_rast)[2], nlyrs=1, xmin=ext(CVeg_rast)[1], xmax=ext(CVeg_rast)[2], ymin=ext(CVeg_rast)[3],ymax=ext(CVeg_rast)[4], crs = crs(CVeg_rast), resolution=90.0000000, vals=NA)
 
 # Remuestreamos con raster original
 CVeg_pixelCuadrado <- resample(CVeg_rast,tmp)
@@ -291,7 +289,7 @@ Para esta ayudantia usaremos la librería descrita en la siguiente publicación:
 
 Primero veamos si las capas son adecuadas para el uso de paquete `lansdcapemetrics`. [aquí](https://r-spatialecology.github.io/landscapemetrics/index.html), estas deben ser rasters de números enteros. Para eso debemos hacer unas correcciones más.
 
-```{r 18 include=FALSE}
+```{r 18}
 # ver si son enteros
 unique(values(CVeg_pixelCuadrado)) 
 
@@ -379,6 +377,7 @@ SanPedro_p_enn_humedal %>%
   geom_histogram(binwidth = 500, fill = "steelblue", color = "black") +
   geom_vline(xintercept = 1000, color = 'green', size = 1.5) +
   geom_vline(xintercept = 10000, color = 'pink', size = 1.5) +
+  scale_y_log10() +
   labs(title = "Distancia al parche más cercano (ENN)",
        x = "Distancia (m)",
        y = "Frecuencia") +

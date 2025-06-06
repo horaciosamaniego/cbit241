@@ -1,0 +1,306 @@
+---
+title: "Nicho y MDE 2"
+author: "Horacio Samaniego (horacio.samaniego@gmail.com)"
+date: "`r Sys.Date()`"
+output: 
+  html_document: 
+    toc: false
+    fig_caption: true
+    number_sections: false
+    df_print: tibble
+editor_options: 
+  markdown: 
+    wrap: 72
+---
+
+# Ayudantía 3: Modelos de Nicho
+
+**Parte 2:** Esta parte de la ayudantía está destinada a la descarga de
+variables climáticas y la preparación de los datos para el análisis de
+nicho climático.
+
+## 0: Setup: Cargar paquetes, configurar el entorno y directorio de trabajo.
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+	echo = TRUE,
+#	message = FALSE,
+#	warning = FALSE,
+	cache = FALSE,
+	tidy = TRUE,
+	tidy.opts = list(blank = FALSE, width.cutoff = 80)
+)
+
+require(pacman)
+pacman::p_load(
+  rgbif,        # Descarga datos de biodiversidad desde GBIF
+  rworldxtra,   # Mapas detallados de países del mundo
+  sf,           # Manejo de datos espaciales vectoriales
+  terra,        # Manejo de datos espaciales raster y vector
+  tidyverse,    # Conjunto de paquetes para manipulación y análisis de datos
+  kableExtra,   # Mejora la presentación de tablas en HTML/LaTeX
+  mapview,      # Visualización interactiva de datos espaciales
+  geodata,      # Descarga de datos geográficos globales
+  ggcorrplot,   # Gráficos de correlación
+  curl,         # Descarga de datos desde internet
+  dismo         # Para Modelar la distribución de especies
+)
+
+# # For dev version
+# # install.packages("devtools")
+# devtools::install_github("haozhu233/kableExtra")
+
+options("kableExtra.html.bsTable" = T)
+
+#setwd(dirname(rstudioapi::getActiveDocumentContext()$path)) ##Cambiar de ser necesario
+
+```
+
+Del ejercicio pasado, tenemos que importar el set de datos y volver a
+darle coordenadas
+
+```{r}
+datos <- st_read("tricahue.gpkg") |>
+  st_transform(crs = 'EPSG:4326') |>
+  dplyr::select(scientificName, grupo)
+```
+
+## 1: Nicho climático
+
+Vamos a buscar cuáles son las condiciones climáticas en que están estos
+registros para generar asi, una definición (gruesa) del nicho climático
+para Tricahue.
+
+Usaremos los datos de Worldclim, que se encuentran documentados
+[aquí](https://www.worldclim.org). Sólo usaremos las variables
+bioclimáticas, en este ejemplo, pero debes complementar esto con
+variables de precipitaciones, temperatura y radiación solar si fuera
+necesario.
+
+-   Ojo: La función `worldclim_country()` de la librería `geodata`
+    permite descargar directamente desde worldclim los datos
+    bioclimáticos por paises. Worlclim ofrece sus datos en 4
+    resoluciones espaciales diferentes; de 30 segundos (0,93 x 0,93 =
+    0,86 km2 en el ecuador) a 2,5, 5 y 10 minutos (18,6 x 18,6 = 344 km2
+    en el ecuador). Los datos originales tenían una resolución de 30
+    segundos. También ofrece datos climáticos de distintas proyecciones
+    de cambio climático futuro (CMIP5) del modelo 'AC' para el año 2070,
+    por ejemplo.\
+
+```{r worldclim, echo=TRUE}
+Bioclim <- geodata::worldclim_country(c("Chile","Argentina"), 
+                             var=c("bio"), res=0.5, path=getwd()) 
+
+names(Bioclim) <- sapply(strsplit(names(Bioclim), split='30s_', fixed=TRUE), function(x) (x[2])) # renombra columnas
+names(Bioclim) <- sapply(gsub('_','',names(Bioclim)), function(x) (x))
+
+
+plot(Bioclim)
+```
+
+Si quieres ver una sola capa y un poco mas grande
+
+```{r}
+capa = 'bio10'
+plot(Bioclim[[capa]], main = capa)
+plot(datos %>% filter(grupo == 'Norte'), add = TRUE, col = 'red')
+plot(datos %>% filter(grupo == 'Sur'),   add = TRUE, col = 'blue')
+```
+
+Al igual que es posible descargar los datos actuales de clima, tambien
+podemos descargar datos modelados a futuro
+
+```{r}
+# Bioclim_futuro <- geodata::cmip6_world(
+#   var = "bio",                # Variables bioclimáticas
+#   res = 0.5,                  # Resolución (en minutos: 10, 5, 2.5)
+#   ssp = "ssp245",             # Escenario: ssp126, ssp245, ssp370, ssp585
+#   model = "BCC-CSM2-MR",      # Modelo climático (hay muchos disponibles)
+#   time = "2041-2060",         # Periodo
+#   path = getwd()              # Carpeta de descarga
+# )
+# 
+# names(Bioclim_futuro) <- sapply(strsplit(names(Bioclim_futuro), split='30s_', fixed=TRUE), function(x) (x[2])) # renombra columnas
+# names(Bioclim_futuro) <- sapply(gsub('_','',names(Bioclim_futuro)), function(x) (x))
+# 
+# plot(Bioclim_futuro)
+```
+
+## 2: Clima en registros de *C. patagonus*
+
+Para extraer los datos bioclimáticos en las coordenadas geográficas,
+debemos consultar los pixeles de los rasters bioclimáticos donde existen
+ocurrencias en muestra base de datos.
+
+![Ejemplo de consulta de valores de raster en
+coordenadas](https://www.esri.com/arcgis-blog/wp-content/uploads/2018/08/extraction_multi.jpg)
+
+La función a usar está en la librería `raster` y se llama `extract()`.
+
+Con eso generamos una tabla con las variables climáticas en cada una de
+las coordenadas en que tenemos registros.
+
+```{r extraccion-datos-bioclimaticos, echo=TRUE}
+# Dividir datos 
+S = datos %>% filter(grupo == 'Sur')
+N = datos %>% filter(grupo == 'Norte')
+
+# extraer los valores del raster Bioclim para los puntos de ocurrencia
+clima <- terra::extract(Bioclim, st_transform(datos,'EPSG:4326'))
+climaS <- terra::extract(Bioclim, st_transform(S,'EPSG:4326'))
+climaN <- terra::extract(Bioclim, st_transform(N,'EPSG:4326'))
+
+# sacar primera columna (id)
+clima <- clima[,-1]
+climaN <- climaN[,-1]
+climaS <- climaS[,-1]
+
+# ver resumen
+clima %>% glimpse()
+```
+
+Vemos la tabla con los datos bioclimáticos para cada registro. *(filas =
+primero 15 registros)*
+
+```{r extract, echo=FALSE}
+filas=15
+clima |>
+  slice(1:filas) |>
+  kable() |>
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed")) |>
+  scroll_box(width = "100%", height = "400px")
+```
+
+Ahora, a qué corresponde bio1, bio2, etc...??
+
+Veamos, por una parte, qué son estas variables:
+`r knitr::include_url("https://www.worldclim.org/data/bioclim.html", height="400px")`
+
+Por otra parte, la inspección de la tabla muestra que sólo tiene los
+valores bioclimáticos. Necesitamos, ciertamente, asociar los registros y
+probablemente otros datos climáticos como temperatura, precipitaciones,
+radiación, por ejemplo.
+
+Pero miremos primero cómo se relacionan los valores bioclimáticos
+recuperados para GBIF tiene registros de *C. patagonus* en Chile.
+
+### Selección de vaiables (bioclimáticas)
+
+Sabemos que las variables bioclimáticas son variables derivadas de la
+variables de clima. Por lo tanto, han de tener **fuertes correlaciones
+entre ellas**. La pregunta es cuales elegir y minimizar asi, esta
+correlación espuria que sólo incrementará el ajuste del modelo de forma
+artificial.
+
+-   [Ver aqui](https://www.worldclim.org/data/bioclim.html) la
+    descripción de las variable bioclimáticas de worldclim.
+
+A continuación se describen las 19 variables bioclimáticas:
+
+-   bio1 = Temperatura media anual
+-   bio2 = amplitud diurna media (media de la temperatura máxima y
+    mínima)
+-   bio3 = Isotermia (bio2/bio7) (\* 100)
+-   bio4 = Estacionalidad de la temperatura (desviación típica \*100)
+-   bio5 = Temperatura máxima del mes más cálido
+-   bio6 = Temperatura mínima del mes más frío
+-   bio7 = Rango anual de temperaturas (bio5-bio6)
+-   bio8 = Temperatura media del trimestre más húmedo
+-   bio9 = Temperatura media del trimestre más seco
+-   bio10 = Temperatura media del trimestre más cálido
+-   bio11 = Temperatura media del trimestre más frío
+-   bio12 = Precipitación total (anual)
+-   bio13 = Precipitación del mes más húmedo
+-   bio14 = Precipitación del mes más seco
+-   bio15 = Estacionalidad de las precipitaciones (coeficiente de
+    variación)
+-   bio16 = Precipitación del trimestre más húmedo
+-   bio17 = Precipitaciones del trimestre más seco
+-   bio18 = Precipitaciones del trimestre más cálido
+-   bio19 = Precipitaciones del trimestre más frío
+
+Buscamos comprender cuáles variables bioclimáticas son
+significativamente relevantes para describir, y predecir, la
+distribución de la especie. Esto significa que debemos poder tener una
+variables que representan, en realidad, un mismo aspecto del clima a la
+hora de generar una predicción.
+
+Veamos la correlación entre la variables bioclimáticas donde hay *C.
+patagonus*. Fíjense que se han agrupados las filas y columnas con
+correlaciones similares para facilitar la interpretación. Eso puede
+hacerse con la librería `ggcorrplot` y su parámetro `hc.order`.
+
+```{r tabla-correlaciones-bioclimaticas, echo=TRUE}
+# install.packages("ggcorrplot")
+# library(ggcorrplot)
+
+corr <- cor(clima,use = "pairwise") 
+
+ggcorrplot::ggcorrplot(corr, method='square',pch=2,show.diag = FALSE, type = "upper", ggtheme = theme_minimal())
+```
+
+Hacemos algunas modificaciones al grafico de correlaci[on para mejorar
+la legibilidad y seleccionamos algunas variables de *Bioclim* que
+muestren baja correlación (cercana a 0, no negativa!).
+
+```{r tabla-correlaciones-bioclimaticas2, echo=TRUE}
+ggcorrplot::ggcorrplot(corr, method='square',pch=2,show.diag = T, type = "full", ggtheme = theme_minimal(), hc.order = TRUE, colors = c("white", "red", "white"))
+```
+
+yo veo las variables :
+
+-   BIO1
+-   BIO5
+-   BIO9
+-   BIO10
+
+(son todas de temperatura?.... mmmh sospechoso. Creo que será importante
+considerar directamente las variables climáticas.)
+
+```{r sel-vars-bioclimaticas, echo=TRUE}
+## ejemplo con algunas variables... que no son las correctas, pero muestra el procedimiento
+var_ambientales <- clima|>
+  dplyr::select(bio1,bio5,bio9,bio10)
+
+rm(clima) # borramos para aliviar la memoria del compu!
+```
+
+## 3: Guardamos los datos
+
+Necesitamos guardar algunos de los objetos creados para usarlos en otra
+sesion.
+
+-   `Bioclim` contiene un raster con las variables de bioclim
+-   `datos` las ocurrencias
+-   `corr` es la matriz de correlacion entre variables bioclimaticas
+-   `Var_ambientales` los valores de variables bioclimaticas con baja
+    correlación el los sitios de ocurrencia
+
+```{r}
+# escribir un raster al disco como .tif
+writeRaster(Bioclim, "Bioclim_raster.tif", overwrite=TRUE)
+
+# Variables ambientales seleccionadas
+write.csv(var_ambientales,"var_ambientales.csv")
+
+# Variables por grupo (opcional)
+# write.csv(Clima,"clima.csv")
+# write.csv(ClimaN,"climaN.csv")
+# write.csv(ClimaS,"climaS.csv")
+```
+
+## 4: Resumen
+
+En esta sesion perparamos los datos para el análisis de nicho climático
+
+-   Descargamos los datos bioclimaticos de
+    [worldclim](https://www.worldclim.org)
+-   "cropeamos" el raster a la extensión de nuestra área de análisis
+-   Renombramos las capas que componen el raster
+-   Graficamos todas las capas bioclimáticas
+-   Generamos una matriz con los valores de las variables climáticas de
+    interés para cada sitio de ocurrencia
+-   Definimos qué variables retener en nuestro modelo analizando la
+    correlación entre las variables climáticas para cada sitio de
+    ocurrencia
+-   Escribimos los objetos generados al disco para su posterior uso

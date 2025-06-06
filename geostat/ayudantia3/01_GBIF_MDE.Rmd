@@ -1,0 +1,540 @@
+---
+title: "Nicho y MDE 1"
+author: "Horacio Samaniego (horacio.samaniego@gmail.com)"
+date: "`r Sys.Date()`"
+output: 
+  html_document: 
+    toc: false
+    fig_caption: true
+    number_sections: false
+    df_print: tibble
+editor_options: 
+  markdown: 
+    wrap: 72
+---
+
+# Ayudantía 3: Modelos de Nicho
+
+El Objetivo de este ayudantía es entender como la distribución de las
+especies esta fuertemente determinada por el clima a travez de la
+generación de un modelo de distibución de nicho ecológico potencial.
+Para esto, la ayudantía se divide en tres partes: En la primera,
+observaremos como descargar y manipular datos de ocurrencia; en la
+segunda, como asociar estos datos de ocurrencia con variables climaticas
+relevantes; y en la tercera, generaremos un modelo de distribución de
+nicho alimentado por estas variables climaticas.
+
+**Parte 1:** Destinada a la descargar y manipular de datos de ocurrencia
+desde la base de datos GBIF.
+
+## 0: Setup: Cargar paquetes, configurar el entorno y directorio de trabajo.
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+	echo = TRUE,
+#	message = FALSE,
+#	warning = FALSE,
+	cache = FALSE,
+	tidy = TRUE,
+	tidy.opts = list(blank = FALSE, width.cutoff = 80)
+)
+
+require(pacman)
+pacman::p_load(
+  rgbif,        # Descarga datos de biodiversidad desde GBIF
+  rworldxtra,   # Mapas detallados de países del mundo
+  sf,           # Manejo de datos espaciales vectoriales
+  terra,        # Manejo de datos espaciales raster y vector
+  tidyverse,    # Conjunto de paquetes para manipulación y análisis de datos
+  kableExtra,   # Mejora la presentación de tablas en HTML/LaTeX
+  mapview,      # Visualización interactiva de datos espaciales
+  geodata,      # Descarga de datos geográficos globales
+  ggcorrplot,   # Gráficos de correlación
+  curl,         # Descarga de datos desde internet
+  dismo         # Para Modelar la distribución de especies
+)
+
+# # For dev version
+# # install.packages("devtools")
+# devtools::install_github("haozhu233/kableExtra")
+
+options("kableExtra.html.bsTable" = T)
+
+#setwd(dirname(rstudioapi::getActiveDocumentContext()$path)) ##Cambiar de ser necesario
+
+```
+
+## 1: Registros de ocurrencia
+
+### Global Biodiversity Information Facility
+
+[GBIF](https://www.gbif.org) es la Global Biodiversity Information
+Facility. Una red de infraestructura de datos internacional financiada
+por distintos gobiernos. Su objetivo es proporcionar acceso libre y
+gratuito a datos sobre biodiversidad a nivel mundial. GBIF movilizan
+datos de diversas fuentes incluyendo museos, herbarios, instituciones de
+investigación y ciudadanos científicos para ponerlos a disposición del
+la comunidad en un único portal. Las principales características y
+funciones de GBIF incluyen:\
+
+-   Agregación de datos: GBIF agrega datos sobre biodiversidad de
+    diversas instituciones y organizaciones, creando un conjunto de
+    datos completo e interoperable.\
+
+-   Accesibilidad a los datos: GBIF proporciona una plataforma para que
+    los usuarios accedan a una gran cantidad de datos sobre
+    biodiversidad. Los investigadores, los responsables políticos y el
+    público en general pueden utilizar la información para diversos
+    fines, como la investigación científica, planificación de la
+    conservación y la toma de decisiones.\
+
+-   Estándares de datos: GBIF promueve el uso de estándares comunes para
+    los datos de biodiversidad, asegurando que la información de
+    diferentes fuentes pueda ser fácilmente integrada y comparada. -
+    Colaboración Internacional: GBIF fomenta la colaboración entre
+    países y organizaciones para compartir datos sobre biodiversidad a
+    nivel mundial. Funciona como una red de nodos, cada uno de los
+    cuales representa a un país o región.\
+
+-   Informática de la Biodiversidad: GBIF desempeña un papel en el
+    avance de la informática de la biodiversidad, que implica el uso de
+    tecnología informática para gestionar y analizar datos de
+    biodiversidad.\
+
+Al proporcionar una plataforma unificada para acceder a los datos de
+biodiversidad, GBIF contribuye a la comprensión global de los patrones
+de biodiversidad, ayuda a controlar los cambios en los ecosistemas y
+apoya los esfuerzos relacionados con la conservación y el desarrollo
+sostenible. Investigadores y responsables políticos confían a menudo en
+GBIF para acceder a información actualizada y completa sobre
+biodiversidad para su trabajo.\
+
+Existen además distintas API orientadas a distintos lenguajes
+informáticos para acceder a esta información. (i.e.
+[Ruby](https://github.com/sckott/gbifrb),
+[Python](https://github.com/gbif/pygbif),
+[PHP](https://gitlab.res-telae.cat/restelae/php-gbif) y
+[R](https://github.com/ropensci/rgbif)). Aquí utilizaremos R para poder
+acceder a datos de GBIF como parte de la practica de hacer [ciencia
+abierta](https://ropensci.org/).
+
+### Registros de ocurrencia
+
+Vamos a hacer un modelo de distribucion de especies para *Cyanoliseus
+patagonus* a partir de registros de ocurrencia.
+
+-   [Descripción](https://www.avesdechile.cl/059.htm) del loro tricahue.
+
+-   [Ficha](https://clasificacionespecies.mma.gob.cl/wp-content/uploads/2019/10/Ficha_Web_TRICAHUE.pdf)
+    del Ministerio del Medio Ambiente para esta especie.
+
+### **¿Cuántos registros hay en Chile?**
+
+La función `occ_count()` retorna la cantidad de registros de presencia
+de acuerdo con criterios como código del taxón (taxonKey), tipo de
+registro (basisOfRecord), país y año, entre otros.
+
+Ahora, `occ_count()` acepta una variedad de parámetros (ver
+`?occ_count`) como por ejemplo, el conteo de registros georreferenciados
+o bien el número de registros por país. Chile en este caso.
+
+```{r ej-gbif-chile, echo=TRUE, warning=FALSE}
+# Número de registros totales con georeferencia para el Mundo
+occ_count(hasCoordinate = TRUE, hasGeospatialIssue=FALSE)
+
+# Número de registros totales con georeferencia para Chile
+occ_count(country="CL", hasCoordinate = TRUE, hasGeospatialIssue=FALSE)
+```
+
+Un ejemplo: ¿Cuántos registros georeferenciado de tricahue (*Cyanoliseus
+patagonus*) existen en GBIF?
+
+```{r tricahue-en-gbif, echo=TRUE}
+# Obtención del código del taxón
+name <- name_backbone(name='Cyanoliseus patagonus', rank='species')  
+
+print(name[, c('usageKey', 'scientificName')])
+```
+
+Usando el número de registro para *Cyanoliseus patagonus* en la Base de
+datos GBIF podemos contarlos:
+
+```{r tricahue-n-cl, echo=TRUE, warning=FALSE}
+p_en_cl <- occ_count(taxonKey = 2479529, 
+          country = 'CL',
+          hasCoordinate = TRUE, 
+          hasGeospatialIssue=FALSE)
+
+print(paste0('En Chile tenemos ',p_en_cl, ' registros de Ocurrencia de Tricahue'))
+```
+
+Hay entonces, `r p_en_cl` registros georeferenciados en Chile en la base
+de datos de GBIF!
+
+-   [Aqui](https://docs.ropensci.org/rgbif/articles/taxonomic_names.html)
+    una guía para trabajar con nombres taxonómicos.
+
+## 2: El loro tricahue
+
+Ahora, podemos describir la distribución de *Cyanoliseus patagonus*.
+
+![*Cyanoliseus patagonus* (Molina,
+1782)](Cyanoliseus_patagonus_-Limari_Province,_Chile_-three-8_(cropped).jpg)
+
+Usaremos dos funciones de la librería `rgbif` para descargar los
+registros georeferenciados de tricahue en Chile. Con `occ_search()` y
+`occ_data()` puedes recuperar esto y obtener todos los registros
+existentes. Entre ellos, nos interesará el *nombre científico*, *país*,
+*continente*, *fecha*, entre otros datos.
+
+`occ_search` nos da un resumen de resultados como los del paquete
+`dplyr` de Tidyverse que nos será muy útil para filtrar, seleccionar y
+agrupar los registros, mientras que `occ_data` está optimizada para ser
+más eficiente y se recomienda en caso de buscar un volumen mayor de
+información desde GBIF.
+
+-   OJO -\> Por defecto, sólo se entrega **máximo de 100.000** registros
+    en cada llamada. ($10^5$)
+-   Mas info
+    [aqui](https://docs.ropensci.org/rgbif/articles/getting_occurrence_data.html)
+    para descargas de datos.
+
+```{r tricahue-chile, echo=TRUE}
+spp ="Cyanoliseus patagonus"
+cp <- occ_data(
+  scientificName = spp, 
+  country = 'CL',
+  limit = 1e6, # define tope de un millón de registros
+  hasCoordinate = TRUE, 
+  hasGeospatialIssue = FALSE
+)
+
+print(dim(cp$data)) # dimensiones del set de datos
+
+```
+
+> En caso de que para su trabajo necesiten descargar volumenes de datos superiores a 100.000, la forma más robusta es usar occ_download(). Para implementarla es necesario tener una cuenta en GBif y usar el paquete `rgbif`.
+
+>Un ejemplo sería:
+
+```{r}
+# library(rgbif)
+
+# # Hacer la solicitud de descarga (genera una clave de descarga)
+# download_key <- occ_download(
+#   pred("scientificName", "Macrocystis pyrifera"),
+#   format = "SIMPLE_CSV"
+# )
+
+# # Verificar el estado de la solicitud
+# occ_download_meta(download_key)
+
+# # Descargar los datos con la clave
+# occ_download_get(download_key, overwrite = TRUE)
+
+# # Abrir archivo descargado
+# datos <- read.csv(unzip("xxx.zip", "occurrence.csv"))
+```
+
+
+Al bajar los datos de GBIF, creamos el objeto `cp` que tiene los datos
+en `cp$data`.
+
+Vemos (con: `dim(cp$data)`) que la consulta nos retornó
+`r nrow(cp$data)` registros (filas) y `r ncol(cp$data)` columnas de
+información para cada registro. Esos son muchos registros. Debemos
+evaluar qué son y ver cuales nos son útiles!!!
+
+Lista completa de columnas que tiene este objeto. *i.e.* Veamos la lista
+de nombres de columnas con `names()`:
+
+```{r cols-tricahue-gbif-chile, echo=TRUE}
+# Lista bonita de nombres con Kable
+names(cp$data) |>
+  kbl() |>
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed"),
+                fixed_thead = T) |>
+  scroll_box(width = "100%", height = "350px")
+
+# Resumen con tidyverse
+cp$data %>% glimpse()
+```
+
+Puedes obtener una descripción de la metadata directamente de
+<http://www.gbif.org>, o en [este
+documento](https://www.gbif.org/sites/default/files/gbif_resource/resource-80640/gbif_metadata_profile_guide_en_v1.pdf "Definiciones de campos de datos GBIF").
+
+Parece que los datos de localidades están en la columns
+`` `stateProvince` ``. Podemos entonces, de la misma manera, ver en que
+regiones ocurrieron los muestreos. El comando `table()` muestra los
+valores únicos en el vector/columna `cp$data$stateProvince` y su
+frecuencia:
+
+```{r localities, echo=TRUE}
+cp$data$stateProvince  |> 
+  table() |>
+  kbl() |>
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed"),fixed_thead = T) |>
+  scroll_box(width = "100%")
+```
+
+Otras columnas que hablan de la ubicación son locality y municipality,
+pero en este caso tienen muchos NAs.
+
+### Construcción de un set de datos geográfico
+
+Cada registro tiene asociado coordenadas geográficas, lo que nos permite
+transformar esta tabla a un objeto de tipo `sf` ([simple
+feature](https://r-spatial.github.io/sf/articles/sf1.html)). Con eso
+podemos representarlo espacialmente.
+
+Primero transformamos estos datos en un objeto "geográfico" de `sf`
+usando las columnas `"decimalLongitude"` para `x` y `"decimalLatitude"`
+para `y`. Hay que tambien designar la proyección geográfico. Aqui es
+simplemente la latlon ([epsg: 4326](https://epsg.io/4326)).
+
+-   [Aquí](https://www.nceas.ucsb.edu/sites/default/files/2020-04/OverviewCoordinateReferenceSystems.pdf)
+    una guía básica para comprender proyecciones geográficas de
+    [NCEAS](https://www.nceas.ucsb.edu/).
+
+```{r tricahue-sf, echo=TRUE}
+cp_sf <- st_as_sf(cp$data, coords = c("decimalLongitude", "decimalLatitude"), 
+                   crs= "epsg:4326")
+```
+
+ahora, veamos nuevamente las primeras 20 filas de la tabla :
+
+```{r ver-tabla-tricahue-gbif, echo=FALSE}
+# mostramos las primeras 20 lineas
+cp_sf[1:20,] |> 
+  kbl() |>
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed")) |>
+  scroll_box(width = "100%", height = "400px")
+```
+
+es básicamente la misma que `cp`, la anterior, sólo que se puede
+manipular espacialente y tiene una columna llamada `geometry`. Esto nos
+permite manipular los datos como si cada fila fuera un punto a ver en un
+mapa pues cada registro (fila) tiene asociada una coordenada.
+
+### Distribución geográfica de registros de C.patagonus en GBIF para Chile
+
+Lo primero es ver donde quedan estas coordenadas. Usaremos `ggplot2`.
+
+Pero, es posible poner los registros en un mapa de las comunas de Chile?
+
+Para eso necesitamos un mapa de las comunas. Buscamos entre los
+shapefiles de la Biblioteca Nacional y lo usamos como mapa base.
+
+```{r leer-shp-bcn, echo=TRUE}
+shp='comunas.shp'
+
+if ( !file.exists(shp) ){
+  url_com = "https://www.bcn.cl/obtienearchivo?id=repositorio/10221/10396/2/Comunas.zip"
+  print(paste("Descargando",shp, "de",url_com))
+  # library(curl)
+  com_tmp = tempfile()
+  com = curl::curl_download(url_com,com_tmp)
+  unzip(com)
+}
+
+comunas = read_sf("comunas.shp") |>
+  dplyr::select(Comuna, Provincia) |>
+  st_transform(crs=32719) # es importante manejar esa info en coordenadas "reales"
+```
+
+Aqui el reproyectado a UTM 19S y vemos la distribución de ocurrencias en
+un mapa
+
+```{r map, echo=TRUE}
+cp_sf2 <- cp_sf |> 
+  dplyr::select(-c(networkKeys, dnaSequenceID)) |> # quitamos columnas de listas (no compatibles con mapview)
+  st_transform(crs=32719) # es importante manejar esa info en coordenadas "reales"
+
+#rm(cp_sf) # borramos mapa en latlon para ahorrar memoria
+
+ggplot() + 
+  geom_sf(data=comunas, alpha=.1) +
+  geom_sf(data = cp_sf2, pch=4, col="purple") + 
+  ggtitle("Registros de C. patagonus en GBIF")  +
+  theme_bw() +
+  ylim(st_bbox(cp_sf2)[2]-5e4,st_bbox(cp_sf2)[4]+5e4) +
+  xlim(st_bbox(cp_sf2)[1]-1.5e5,st_bbox(cp_sf2)[3]+5e4) # ajustar
+```
+
+podemos hacer un zoom limitando el `x` e `y` a mostrar con `ylim` y
+`xlim`. Para eso usamos `st_bbox()` que retorna la extensión del objeto
+geográfico. Noten las diferencias entre los objetos.
+
+Objeto en coordenadas geograficas
+
+```{r extension-pountos1, echo=TRUE}
+# con esto vemos los limites geograficos al obj
+print('cp_sf:')
+print(st_bbox(cp_sf))
+```
+
+Objeto en cordenadas UTM
+
+```{r extension-pountos2, echo=TRUE}
+print('cp_sf2:')
+print(st_bbox(cp_sf2))
+
+# borrar el primero para liberar memoria
+rm(cp_sf)
+```
+
+### Visualización interactiva
+
+Podemos usar la librería
+[mapview](https://r-spatial.github.io/mapview/ "librería para R") para
+explorar los datos de forma interactiva, usando la columna `year`, por
+ejemplo, si queremos ver cómo se ha muestreado a través de los años.
+
+```{r ploteo-interactivo1}
+mapview(cp_sf2, zcol='year', alpha=.35, layer.name='Año')
+```
+
+Como veremos en el próximo, hay 2 núcleos principales (¿poblaciones?) y
+algunos puntos que representan, probablemente, errores de avistamiento.
+OjO: Debieramos removerlos antes del análisis.
+
+## 3: Limpieza de datos
+
+Este paso consiste en limpiar los datos que nos parecen espurios, pues
+asemejan mas a un error de identificación, o ingreso de datos, que a
+registros reales de la especie.
+
+Para eso vamos a:
+
+1.  Ver las ocurrencias repetidas.
+2.  Marcar cada registro de ocurrencia en dos grupos: Norte y Sur.
+
+### Ver las ocurrencias repetidas
+
+OJO\*\*\* Creamos primero una tabla (`conteo`) que resume el número de
+avistamientos por localidad y se lo agregamos a una columna llamada
+'Número de registros'. Fíjate en el uso de `group_by()`, `mutate()` y
+`distinct()`. Son funciones de `dplyr` que en su conjunto agrupan por
+punto de muestreo, luego crea (con `mutate()`) una columna donde
+almacena el número de registros distintos.
+
+```{r conteo, echo=TRUE}
+# agregamos columnas de cordenadas en grados
+cp_sf2 <- cp_sf2 |> # en UTM
+  filter(!st_is_longlat(geometry)) |>
+    mutate('lon'=st_coordinates(st_transform(geometry,'EPSG:4326'))[,1], 
+         'lat'=st_coordinates(st_transform(geometry,'EPSG:4326'))[,2]) 
+
+# generamos un df con la cantidad de registros por zona geografica con los datos post 2000
+cp_sf2_count <- cp_sf2 |>
+  filter(year > 2000) |> 
+  group_by(geometry) |>
+  dplyr::select(scientificName, lon, lat, geometry) |>
+  mutate('NumeroRegistros'=n()) |>
+  distinct()|>
+  st_as_sf()
+
+cp_sf2_count$NumeroRegistros %>% summary()
+```
+
+Vemos solo las columnas indicadas por `select()`:
+
+```{r conteo-tricaue, echo=TRUE}
+filas = 15 # vamos a muestrear n numero de filas para mostrar.  
+cp_sf2_count[sample(1:nrow(cp_sf2_count),size=filas),] |>
+  kbl() |>
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed")) |>
+  scroll_box(width = "100%", height = "400px")
+```
+
+### Ploteo interactivo con MapView
+
+Permite ver los datos en un contexto geográfico web. Podemos también
+ajustar el tamaño de los puntos según valor de la columna de los números
+de registros, separados por la categoría de año (columna `year`).
+
+```{r ploteo-interactivo2, echo=TRUE}
+mapview(cp_sf2_count %>% filter(NumeroRegistros > 10), zcol='NumeroRegistros', alpha=.35, layer.name= 'Número de Registros')
+```
+
+Marcar cada registro de ocurrencia en dos grupos: Norte y Sur.
+
+```{r}
+lim_norte = -28.715
+lim_sur = -36.24
+lim_sur_grupo_norte = -31.006
+lim_norte_grupo_sur = -33.34
+lim_oeste_grupo_sur = -71.8
+
+cp_sf2_count <- cp_sf2_count |>
+  mutate(grupo = case_when(
+    lat > lim_sur_grupo_norte & lat < lim_norte ~ 'Norte',
+    lat < lim_norte_grupo_sur & lat > lim_sur & lon > lim_oeste_grupo_sur ~ 'Sur',
+    TRUE ~ 'Otro'))
+```
+
+Veamos como quedó
+
+```{r plot-groups,echo=FALSE}
+mapview(cp_sf2_count, zcol='grupo', alpha=.35, layer.name='Grupo')
+
+```
+
+### ¿Cómo guardo el set de datos?
+
+Podemos guardar el set de datos generado en diversos formatos. El mas
+práctico en un csv, que puede verse en cualquier otra aplicación (e.g.
+excel)
+
+```{r}
+# Tambien pueden guardarlo como geo package
+write_sf(cp_sf2_count, "tricahue.gpkg")
+```
+
+## 4: Resumen
+
+Repaso de lo hecho en este ejercicio,
+
+1.  Bajamos los datos de ocurrencia para una especie desde el
+    repositorio [GBIF](https://www.gbif.org). Especificamente aprendimos
+    a:
+
+-   Encontrar el número de registros que existen en GBIF para una
+    especie determinada.
+-   Encontrar y usar el identificador de especie y revisar los campos
+    asociados a los datos de GBIF.
+-   Desplegar una tabla y formatearla de forma atractiva limitando el
+    número de filas y mostrando filas de formaleatoria.
+
+2.  Construimos un set de datos geográficos (objeto "simple feature"
+    `sf`) de puntos a partir de una tabla con columnas que describen su
+    coordenada. Especificamente aprendimos a:
+
+-   Reproyectamos este se de datos a UTM19S.
+-   Descargamos datos desde una URL directamente en el espacio de
+    trabajo.
+-   Importamos un shapefile a R.
+-   Construimos un bucle condicional para no volver a descargar si el
+    archivo ya existe en el espacio de trabajo.
+
+3.  Visualizamos. Especificamente aprendimos a:
+
+-   Usamos el sistema integrado a R-base para visualizar: `plot()`.
+-   Aprendimos a visualizar objetos geográficos en ggplot, integrándo en
+    la visualización un mapa base y mezclando polígonos con puntos.
+-   Aprendimos a manipular la extensión del objeto geográfico para
+    optimizar su visualización.
+-   Aprendimos a generar una visualización interactiva usando la
+    libraría `mapview` visualizando una tercera y cuarta dimensión al
+    ajustando el color y el tamaño del punto a visualizar.
+
+Finalmente, - nos quedamos con un objeto geográfico que contiene la
+ocurrencia de nuestra especie en estudio. - marcamos las ocurrencia en 2
+grupos, los del norte y los del sur.
+
+### ¿Qué sigue?
+
+En el próximo paso vamos a modelar la distribución de estos 2 grupos de
+ocurrencias como si fueran distintos y vamos a comparar el nicho de las
+del norte con el nicho de las del sur.

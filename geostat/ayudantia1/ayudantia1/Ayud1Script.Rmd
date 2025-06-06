@@ -1,0 +1,349 @@
+---
+title: "AYUDANTÍA 1: Dependencia espacial"
+author: "Joseba Iribarren <josebairibarren@gmail.com>"
+date: "2025-03-14"
+output: html_document
+---
+
+# AYUDANTÍA 1: Dependencia espacial
+
+En esta ayudantía veremos como opera los patrones espaciales (atracción, repulsión e "indiferencia”), interpretando cada uno mediante el K-Ripley.\
+
+Además de como podemos visualizar la primera ley de la geografía, o ley de Tobler:\
+
+**"Todas las cosas están relacionadas entre sí, pero las cosas más próximas en el espacio tienen una relación mayor que las distantes."** (Waldo Tobler)\
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+	echo = TRUE,
+	message = FALSE,
+	warning = FALSE
+)
+```
+
+### 0) Paquetes y working directory
+
+```{r warning=FALSE}
+require(pacman)
+pacman::p_load(tidyverse, # para manejo de datos
+               plotly, #mapa interactivo para ggplot
+               gridExtra, # para unir graficos
+               sf, # para trabajar con datos vectoriales
+               terra, # para trabajar con datos raster
+               leaflet, # para hacer mapas dinamicos
+               spatstat, # calculo K de Ripley
+               spdep, # autocorrelograma
+               ncf, # spline correlation
+               geostats, # semivarigrama
+               gstat, # mapa semivarigrama y semivarigrama direccional
+               latex2exp) #LaTeX
+
+setwd(dirname(rstudioapi::getActiveDocumentContext()$path)) ##Cambiar de ser necesario
+
+```
+
+### 1) Cargar capas
+
+```{r Leer gpkg, message=FALSE, warning=FALSE}
+# Ver las capas de mi archivo geopackage
+st_layers("datosAyu1.gpkg")
+
+# Capas vectoriales ("puntos de muestreo")
+agrupados <- st_read("datosAyu1.gpkg", layer = "Ayud1_pAgrupados", quiet=TRUE) # `quiet` suprime imprimir la def de la capa leida
+aleatorios <- st_read("datosAyu1.gpkg", layer = "Ayud1_pAleatorios", quiet=TRUE)
+uniforme <- st_read("datosAyu1.gpkg", layer = "Ayud1_pEquidistantes", quiet=TRUE)
+losRios <- st_read("datosAyu1.gpkg", layer = "losRios", quiet=TRUE)
+
+# Capa raster (% arcilla a 5-15cm)
+arcilla <- rast('Arcilla5_15LosRios.tif')
+
+# Galleguillos, M., Dinamarca, D., Seguel, O., & Faundez, C. (2022). CLSoilMaps: A national soil gridded product for Chile [Data set]. En Earth Science System Data (Versión V1). Zenodo. https://doi.org/10.5281/zenodo.7464210
+```
+
+### 2) Visualizar capas
+
+```{r visualizar coberturas}
+map1 <- ggplot() +
+  geom_sf(data = losRios, fill = 'white') +
+  geom_sf(data = aleatorios, color = 'green') +
+  ggtitle('Indiferencia') +
+  theme_void()
+
+map2 <- ggplot() +
+  geom_sf(data = losRios, fill = 'white') +
+  geom_sf(data = agrupados, color = 'yellow') +
+  ggtitle('Atracción') +
+  theme_void()
+
+map3 <- ggplot() +
+  geom_sf(data = losRios, fill = 'white') +
+  geom_sf(data = uniforme, color = 'red') +
+  ggtitle('Repulsión') +
+  theme_void()
+
+grid.arrange(map1, map2, map3, ncol = 1)
+```
+
+[Link: Ejemplos en la Naturaleza](https://imgur.com/a/gaMxt38)\
+
+Cuando vemos patrones espaciales en la naturaleza siempre tenemos que preguntarnos:\
+
+*¿A que escala ocurre este patron?*\
+*¿A otra escala esto cambia?*\
+
+Hagamos zoom en el siguiente mapa para descubrirlo\
+
+```{r}
+# Mapa interactivo 1
+ggplotly(map2)
+```
+
+```{r}
+# Mapa interactivo 2
+leaflet() %>%
+  addTiles() %>% 
+  addPolygons(data = losRios) %>% 
+  addCircleMarkers(data = agrupados, color = 'yellow', radius = 1, opacity = 1)
+```
+
+### 3) K de Ripley
+
+Uno de los análisis multiescala más comúnmente utilizados para datos referenciados por puntos (solo coordenadas) es la función K de Ripley (Ripley 1976; Fortin y Dale 2005).\
+
+Conceptualmente, la implementación de la función K de Ripley, K(t), implica centrar un círculo de radio t sobre cada punto, y luego contar el número de otros puntos (vecinos) que caen dentro de ese círculo (Haase 1995). Luego, el procedimiento se repite para círculos de diferentes radios.\
+
+Aleatorio:
+
+```{r}
+# Trasformar objeto sf en ppp
+ventana_aleatorios <- as.owin(st_bbox(aleatorios))
+coords <- st_coordinates(aleatorios)
+aleatorios_ppp <- ppp(x = coords[, 1], y = coords[, 2], window = ventana_aleatorios)
+
+# Aplicar función para estimar la función de segundo momento reducida de Ripley 
+KAleatorio <- Kest(aleatorios_ppp, correction = 'periodic', var.approx = T)
+
+plot(KAleatorio, main="Función K para puntos aleatorios")
+```
+
+"Agrupados":
+
+```{r}
+# Trasformar objeto sf en ppp
+ventana_agrupados <- as.owin(st_bbox(agrupados))
+coords <- st_coordinates(agrupados)
+agrupados_ppp <- ppp(x = coords[, 1], y = coords[, 2], window = ventana_agrupados)
+
+# Aplicar función para estimar la función de segundo momento reducida de Ripley 
+KAgrupados <- Kest(agrupados_ppp, correction = 'periodic', var.approx = T)
+
+plot(KAgrupados, main="Función K para puntos agrupados")
+```
+
+Regulares:
+
+```{r}
+# Trasformar objeto sf en ppp
+ventana_uniforme <- as.owin(st_bbox(uniforme))
+coords <- st_coordinates(uniforme)
+uniforme_ppp <- ppp(x = coords[, 1], y = coords[, 2], window = ventana_uniforme)
+
+# Aplicar función para estimar la función de segundo momento reducida de Ripley 
+KUniforme <- Kest(uniforme_ppp, correction = 'periodic', var.approx = T)
+
+plot(KUniforme, main="Función K para puntos uniformes")
+```
+
+### 4) L(r)
+
+Podemos generar una correción para facilitar la compara el `K` obtenido ($$Kˆ(t)$$) con el $K$ estadisticamente esperado ($K(t)$), con lo que llamamos la función `L` ($L(t)$).
+
+```{r}
+LAleatorio <- sqrt(KAleatorio/pi)
+plot(LAleatorio, ylab="L(r)", main="Función L para puntos aleatorios")
+```
+
+```{r}
+LAgrupados <- sqrt(KAgrupados/pi)
+plot(LAgrupados, ylab="L(r)", main="Función L para puntos agrupados")
+```
+
+```{r}
+LUniformes <- sqrt(KUniforme/pi)
+plot(LUniformes, ylab="L(r)", main="Función L para puntos uniformes")
+```
+
+Con ggplot
+
+```{r}
+LAleatorio_df <- data.frame(r = LAleatorio$r,
+                            per = LAleatorio$per,
+                            theo = LAleatorio$theo)
+
+ggplot(LAleatorio_df) +
+  geom_line(aes(r, theo), color = 'red', linetype = 'dashed') +
+  geom_line(aes(r, per)) +
+  labs(y = 'L(r)') +
+  theme_minimal()
+```
+
+# Parte 2: Autocorrelograma
+
+```{r}
+# Borrar todo excepto las capas
+rm(list = setdiff(ls(), c('agrupados', 'aleatorios', 'uniforme', 'losRios', 'arcilla')))
+```
+
+Hasta el momento, solo generamos un análisis con la posición espacial de los puntos, pero esta vez queremos ver cómo se aplica la ley de Tobler a través de un autocorrelograma. Para esto, necesitamos valores, los cuales extraeremos de una capa de contenido de arcilla para la región de Los Ríos a una profundidad de 5 a 15 cm.
+
+```{r}
+# ver raster
+leaflet() %>%
+  addRasterImage(arcilla, colors = "Greens") %>%
+  addCircleMarkers(data = aleatorios, color = 'red', radius = 0.5, opacity = 1)
+
+# extraer valores del raster
+valores <- terra::extract(arcilla, aleatorios)
+# agregar esos valores a la capa de puntos
+aleatorios <- aleatorios %>% 
+  mutate(porcentajeArcilla = valores$Arcilla5_15LosRios) %>% 
+  filter(!is.na(porcentajeArcilla))
+
+# pasar a UTM para hacer los calculos en metros
+aleatorios <- st_transform(aleatorios, crs = 32718)
+```
+
+## Moran I
+
+En el caso de la autocorrelación espacial indexada por el I de Moran, nos interesa el grado en que los valores de dos ubicaciones dentro de una cierta distancia (d) covarían.\
+
+Calculamos la autocovarianza espacial como la suma de los productos de las desviaciones de cada par de puntos, respecto a la media global obtenida en todo el paisaje para esa variable. See puede pensar como un tipo de covarianza estandarizada.\
+
+Si hacemos este analisis para distintas distancias podemos tener una intuición de a que distancia se pierde la correlación espacial (análisis de sensibilidad).\
+
+```{r}
+# vector vacio donde se guardara el resultado del loop
+moran_I <- c()
+
+# for loop para calcular Moran I cambiando la distancia.
+for (d in (seq(5, 200, 5)*1000)) {
+  # Paso 1: Crear matriz de pesos espaciales
+  aleatorios.nb <- dnearneigh(aleatorios, d1 = 0, d2 = d)
+  aleatorios.lw <- nb2listw(aleatorios.nb, style = "W", zero.policy = TRUE)
+  # Paso 2: Calcular el índice de Moran I
+  moran <- moran.mc(aleatorios$porcentajeArcilla, aleatorios.lw, nsim = 100, zero.policy = TRUE)
+  moran_I <- c(moran_I, moran$statistic)
+}
+
+# Generar df con el vector del loop
+moran_I <- data.frame(moran = moran_I, 
+                      distance = (seq(5, 200, 5)*1000))
+
+# Graficar
+ggplot(moran_I, aes(x = distance/1000, y = moran)) + 
+  geom_point() +
+  geom_line() +
+  labs(x = 'Distancia [Km]',
+       y = 'Moran I',
+       title = 'Autocorrelación espacial con la I de Moran') +
+  theme_light()
+
+# hecho en base a: https://pages.cms.hu-berlin.de/EOL/gcg_quantitative-methods/Lab15_SpatialRegression.html
+```
+
+## Correlograma con Spline
+
+Existen otras maneras de evaluar la autocorrelación espacial, una de ellas es hacer un 'spline correlogram'. El cual se basa en usar un spline de suavización para estimar la relación continua entre la distancia y los valores. A diferencia de otros metodos como Moran I, en donde los intervalos de distancia son discretos.\
+
+```{r}
+aleatorios_sample <- aleatorios #%>% sample_n(100)
+
+corrds <- st_coordinates(aleatorios_sample)
+spline_corr <- spline.correlog(x = corrds[,1], 
+                               y = corrds[,2], 
+                               z = aleatorios_sample$porcentajeArcilla, 
+                               df = 15)
+
+plot(spline_corr)
+```
+
+# Parte 3: Semivariograma
+
+El semivariograma es una herramienta ocupada para ver como cambia la variabilidad espacial con la distancia. Y se calcula mediante la mitad de la diferencia cuadrática media (*varianza*) entre puntos separados por una distancia $h$.
+
+$$\gamma(h)=\frac{1}{2N_h} \sum_{i=1}^{N_h}[ Z(x_i+h)-Z(x_i) ]^2$$
+
+El gráfico que plotea el valor de la semivarianza ($\gamma$) a distintas distancias ($h$) es el **semivariograma**. Este tiene 3 elementos importantes para comprender la dependencia espacial de la cantidad evaluada.
+
+-   **Nugget**: (también llamado *efecto pepita* o *error de muestreo*) es el error de muestro. Correponde al valor de la semivarianza cuando $h = 0$ (es decir, en la intersección con el eje *y*). Aunque en teoría debería ser cero, la intersección suele ser mayor que cero en la práctica, debido a la presencia de heterogeneidad de microescala que no hemos medido (nuestra granularidad de muestreo es demasiado grande) o debido al muestreo o errores de medición resultantes de diferencias entre observadores (sesgo del observador), errores de instrumentación, etc. (Fortin y Dale, 2005).\
+
+-   **Rango**: es la distancia ($h$) donde la semivarianza ($\gamma$) se estabiliza, o es máxima. En la práctica, el rango tiene unidades de distancia. Teóricamente indica el el punto desde el cuál deja de existir dependencia espacial para la variable estudiada y debiera (teóricamente) corresponder a la distance en que la autorrelación es cero (0). El rango se identifica por el punto donde los valores de $\gamma$ comienzan a estabilizarse (es decir, cuando $h \rightarrow$ "*Sill*").\
+
+-   **Sill**: La *varianza máxima/total*, o Sill, es un valor de $\gamma$ (medido en las unidades de la variable estudiada), y se refiere a la parte del variograma donde la semivarianza se estabiliza y forma una meseta. En este dominio, la distancia ya no afecta la estructura espacial de los datos (es decir, los datos son espacialmente independientes). Sin embargo, no todos los patrones espaciales tienen un Sill, o umbral de dependencia espacial!. Como la *varianza total* tiene unidades de la variable estudiada, al igual que el nugget, es posible descomponer el Sill en 2 partes, el Nugget y el *sill parcial*, que corresponde a la fracción de la varianza total menos la varianza que le corresponde al nugget. Asi *varianza total = error de muestreo + sill parcial*.\
+
+```{r}
+aleatorios_sv <- geostats::semivariogram(x = corrds[,1], 
+              y = corrds[,2],
+              z = aleatorios_sample$porcentajeArcilla,
+              plot = T,
+              nb = 9,
+              model = c("spherical", "exponential", "gaussian")
+              )
+
+
+aleatorios_sv_df <- tibble(dist_km = aleatorios_sv$h/1000,
+                           sv = aleatorios_sv$sv)
+
+ggplot(aleatorios_sv_df, aes(x = dist_km, y = sv)) +
+  geom_point() +
+  geom_text(aes(x = max(dist_km), y = min(sv)),
+            label = paste0('Nugget: ', aleatorios_sv$snr[2] %>% round(2),
+                           '\nSill: ', aleatorios_sv$snr[1] %>% round(2),
+                           '\nRange: ', (aleatorios_sv$snr[3]/1000) %>% round(2)),
+            hjust = 1, vjust = 0,
+            size = 5) +
+  labs(x = 'Distancia [Km]',
+       y = 'Semivarianza [%^2]',
+       title = 'Semivariograma') +
+  theme_minimal()
+```
+
+# Materia Opcional (fuera de los objetivos del curso)
+
+Sin embargo, al realizar este calculo lo estamos haciendo sin considerar la direción de la distancia. Ante esto podemos generar un variograma de mapa para identidicar una posible direccionalidad en la fuerza de la dependencia espacial (Anisotropia).
+
+```{r}
+# Calcular mapa de variograma
+aleatorios_sv_map <- variogram(porcentajeArcilla ~ 1, aleatorios_sample, 
+                               map = TRUE, covariogram = T,
+                               cutoff=150*1000, width=150/15*1000)
+# graficar
+plot(aleatorios_sv_map, col.regions = heat.colors(64),
+     main="Covariogram Map",
+     xlab="Longitud [m]",
+     ylab="Latitud [m]")
+
+```
+
+Si tenemos una asimetria en la fuerza de la dependencia espacial podemos generar variogramas direccionales.
+
+```{r}
+plot(variogram(porcentajeArcilla ~ 1, aleatorios_sample, 
+               alpha = c(0, 90),
+               cutoff = 150*1000,
+               width=150/15*1000),  
+               main = "Variograma Direccional, % Arcilla",
+               sub = "Azimuth 0N (Norte-Sur), 90N (Este-Oeste)", 
+               xlab="Distancia [m]",
+               pch = 20, col = "blue")
+```
+
+# Tarea -- grupos de no mas de 3 estudiantes
+
+(Será presentada en clases)
+
+1.  Calcule el K de Ripley, haga un autocorrelograma con spline y realice un semivariograma, eligiendo para esto una de las capas de puntos y un ráster de la sección tarea.
+
+2.  Investiga cuál es la diferencia entre el semivariograma empírico y el modelado. Prepara una mini presentación con 2 semivariograma modelos como ejemplo.
+
+3.  Adicionalmente, sin el uso de mapas, y en base a los análisis anteriores, describa cómo se distribuyen los puntos a distintas escalas y en qué punto (unidades de distancia), aproximadamente se pierde la autocorrelación espacial.\
