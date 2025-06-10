@@ -66,7 +66,8 @@ datos <- st_read("tricahue.gpkg") |>
 
 # Raster con (todo) Bioclim para el área
 Bioclim <- rast("Bioclim_presente.tif")
-# Bioclim = rast("Bioclim_futuro.tif")
+Bioclim_futuro <- rast("Bioclim_futuro.tif") 
+names(Bioclim_futuro) <- names(Bioclim)
 
 # variables ambientales para ocurrencias de tricahue
 var_ambientales <- read.csv("var_ambientales.csv", row.names = 1)
@@ -187,6 +188,13 @@ Con el modelo podemos generar
 
 ```{r glm_prediccion, echo=TRUE}
 predictions <- predict(Bioclim[[names(var_ambientales)]], modelo_glm, type = "response")
+
+plot(predictions, colNA='black')
+```
+
+Prediccion para condiciones futuras
+```{r glm_prediccion, echo=TRUE}
+predictions <- predict(Bioclim_futuro[[names(var_ambientales)]], modelo_glm, type = "response")
 
 plot(predictions, colNA='black')
 ```

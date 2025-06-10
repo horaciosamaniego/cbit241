@@ -112,18 +112,18 @@ Al igual que es posible descargar los datos actuales de clima, tambien
 podemos descargar datos modelados a futuro
 
 ```{r}
-# Bioclim_futuro <- geodata::cmip6_world(
-#   var = "bio",
-#   ssp = "585",           # Escenario socioeconómico (SSP585)
-#   model = "MIROC6", # Modelo climático global
-#   time = "2061-2080",  # Periodo futuro
-#   res = 5,             # Resolución en minutos de arco
-#   path = getwd()   # Carpeta donde guardar los archivos
-# )
-# 
-# Bioclim_futuro <- Bioclim_futuro %>% crop(ext(Bioclim))
-# 
-# plot(Bioclim_futuro)
+Bioclim_futuro <- geodata::cmip6_world(
+  var = "bio",
+  ssp = "585",           # Escenario socioeconómico (SSP585)
+  model = "MIROC6", # Modelo climático global
+  time = "2061-2080",  # Periodo futuro
+  res = 2.5,             # Resolución en minutos de arco
+  path = getwd()   # Carpeta donde guardar los archivos
+)
+
+Bioclim_futuro <- Bioclim_futuro %>% crop(ext(Bioclim))
+
+plot(Bioclim_futuro)
 ```
 
 ## 2: Clima en registros de *C. patagonus*
