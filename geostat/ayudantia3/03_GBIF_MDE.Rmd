@@ -1,0 +1,325 @@
+---
+title: "Nicho y MDE 3"
+author: "Horacio Samaniego (horacio.samaniego@gmail.com)"
+date: "`r Sys.Date()`"
+output: 
+  html_document: 
+    toc: false
+    fig_caption: true
+    number_sections: false
+    df_print: tibble
+editor_options: 
+  markdown: 
+    wrap: 72
+---
+
+# Ayudantía 3: Modelos de Nicho
+
+**Parte 3:** Esta parte de la ayudantía está destinada a la modelación
+de nicho. Así como la validación del modelo y su representación en el
+espacio.
+
+## 0: Setup: Cargar paquetes, configurar el entorno y directorio de trabajo.
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+	echo = TRUE,
+#	message = FALSE,
+#	warning = FALSE,
+	cache = FALSE,
+	tidy = TRUE,
+	tidy.opts = list(blank = FALSE, width.cutoff = 80)
+)
+
+require(pacman)
+pacman::p_load(
+  rgbif,        # Descarga datos de biodiversidad desde GBIF
+  rworldxtra,   # Mapas detallados de países del mundo
+  sf,           # Manejo de datos espaciales vectoriales
+  terra,        # Manejo de datos espaciales raster y vector
+  tidyverse,    # Conjunto de paquetes para manipulación y análisis de datos
+  kableExtra,   # Mejora la presentación de tablas en HTML/LaTeX
+  mapview,      # Visualización interactiva de datos espaciales
+  geodata,      # Descarga de datos geográficos globales
+  ggcorrplot,   # Gráficos de correlación
+  curl,         # Descarga de datos desde internet
+  dismo         # Para Modelar la distribución de especies
+)
+
+# # For dev version
+# # install.packages("devtools")
+# devtools::install_github("haozhu233/kableExtra")
+
+options("kableExtra.html.bsTable" = T)
+
+setwd(dirname(rstudioapi::getActiveDocumentContext()$path)) ##Cambiar de ser necesario
+
+```
+
+Del ejercicio pasado, tenemos que importar los objetos nuevamente
+
+```{r}
+# Datos 
+datos <- st_read("tricahue.gpkg") |>
+  st_transform(crs = 'EPSG:4326') |>
+  dplyr::select(scientificName, grupo)
+
+# Raster con (todo) Bioclim para el área
+Bioclim <- rast("Bioclim_presente.tif")
+# Bioclim = rast("Bioclim_futuro.tif")
+
+# variables ambientales para ocurrencias de tricahue
+var_ambientales <- read.csv("var_ambientales.csv", row.names = 1)
+# var_ambientales = read.csv("var_ambientales_sur.csv", row.names = 1)
+# var_ambientales = read.csv("var_ambientales_norte.csv", row.names = 1)
+
+# chile
+chile <- gadm(country = "CHL", level = 0, path = tempdir())
+
+```
+
+## 1) Modelos de distribución de especies
+
+### 1.1) Pseudo-ausencias (i.e. no-avistamientos)
+
+Necesitamos generar datos de pseudo-ausencias para evaluar sitios donde
+no se ha encontrado tricahue. Para eso generaremos puntos aleatorios en
+la misma cantidad de ocurrencias descargadas de GBIF.
+
+Luego, combinamos con los datos de variables climáticas obtenidas para
+generar un objeto con todas las variables climáticaspara los sitios de
+presencias y de preudo-ausencias.
+
+```{r}
+p_load(dismo)
+
+# setting random seed to always create the same
+# random set of points for this example
+set.seed(69) 
+
+# puntos aleatorios en el área de estudio
+backgr <- dismo::randomPoints(raster::stack(Bioclim %>% mask(chile)), nrow(var_ambientales))
+
+# Restringimos extraccion a capas bioclimaticas de interes
+pseudo_ausencias <- extract(Bioclim[[names(var_ambientales)]], backgr) 
+
+# Vector de 0s y 1s para indicar ausencia y presencia
+presencias <- c(rep(0, nrow(pseudo_ausencias)), rep(1, nrow(var_ambientales)))
+# ver conteo
+presencias %>% table()
+
+# unir datos de ausencia y presencia junto con vector de 1s y 0s
+model_data <- data.frame(cbind(presencias, rbind(pseudo_ausencias, var_ambientales)))
+```
+
+Ahora que tenemos datos climáticos para nuestros puntos de presencia y
+pseudoausencia en el objeto `model_data`, vamos a construir nuestro
+modelo utilizando sólo una parte de nuestros datos, y utilizaremos los
+datos de *testeo* para evaluar después el rendimiento del modelo con el
+set de *validación*.
+
+### 1.2) Separación de datos
+
+Separamos entonces nuestros datos en un conjunto de entrenamiento, o
+*testeo* (i.e. datos utilizados para construir el modelo) y un conjunto
+de prueba, o *validación* (i.e. los datos utilizados para evaluar el
+modelo).
+
+Vamos a reservar el 20% de los datos para las pruebas, por lo que
+utilizaremos la función `folds()` del paquete `predicts` para asignar
+uniformemente cada punto a un grupo aleatorio. Para asegurarnos de que
+tenemos una muestra más o menos representativa tanto de puntos de
+presencia como de pseudoausencia, utilizamos la columna `presencias`
+para indicar a `R` que nuestros datos tienen estos dos subgrupos.
+
+```{r}
+p_load(predicts)
+fold <- folds(x = model_data,
+              k = 5,
+              by = model_data$presencias)
+
+# tabla de frecuencia en cada grupo
+table(fold)
+```
+
+Dejaremos los puntos en el grupo 1 para *validación* y los otros grupos
+(i.e. 2, 3, 4 y 5) para *entrenar* el modelo
+
+```{r}
+testing <- model_data[fold == 1, ]
+training <- model_data[fold != 1, ]
+```
+
+### 1.3) Generalized Linear Model (GLM)
+
+El modelo lineal generalizado, o Generalized Linear Model, es una
+extensión de los modelos de regresión lineal que permite modelar
+variables dependientes que no siguen una distribución normal (Eje:
+Binaria -\> presencia/ausencia, éxito/fallo)
+
+Ajustar el modelo:
+
+```{r glm, echo=TRUE}
+modelo_glm <- step(glm(presencias ~ ., data=training, family = binomial()), trace=0)
+summary(modelo_glm)
+```
+
+Sin embargo, ya que las variables climaticas se mueven en rangos
+distintos. Para facilitar la comparación de la importancia relativa de
+las variables en el modelo suele ser recomendable escalar las variables
+antes de ajustar el modelo
+
+```{r glm_scaled}
+# esclar variables entre 0 y 1
+training_escalado <- cbind(training[1], as.data.frame(lapply(training[-1], \(x) (x - min(x, na.rm = TRUE)) / (max(x, na.rm = TRUE) - min(x, na.rm = TRUE)))))
+
+# comprobar 
+training_escalado$bio10 %>% hist()
+
+# modelar
+modelo_glm_escalado <- step(glm(presencias ~ ., data=training_escalado, family = binomial()), trace=0)
+summary(modelo_glm_escalado)
+```
+
+### 1.4) Predicción
+
+Con el modelo podemos generar
+
+```{r glm_prediccion, echo=TRUE}
+predictions <- predict(Bioclim[[names(var_ambientales)]], modelo_glm, type = "response")
+
+plot(predictions, colNA='black')
+```
+
+## 2) Evaluación del modelo
+
+Artículos relevantes: - [Fieldings et al
+(1997)](https://www.dropbox.com/scl/fi/s9a0e56osliczbl3csuhg/Fielding_Bell_1997_A-review-of-methods-for-the-assessment-of-prediction-errors-in-conservation.pdf?rlkey=n1iib2m1dcgpc7ad81ykdy3np&dl=0) -
+[Liu et al. (2011)](https://doi.org/10.1111/j.1600-0587.2010.06354.x)
+
+### 2.1) Validación
+
+El estadístico de evaluación más común es el AUC: el área bajo la curva
+receiver-operating characteristic (ROC). Las curvas ROC se generan
+calculando la *sensibilidad* (tasa de verdaderos positivos) y la
+*especificidad* (tasa de verdaderos negativos) para muchos umbrales a lo
+largo de toda la gama de probabilidades previstas. Como veremos en el
+gráfico mas abajo, (1-especificidad) se traza en el eje de abscisas
+frente a la sensibilidad en el eje de ordenadas. El área bajo esta curva
+se denomina AUC. Cuanto más se desvíe la curva generada de la línea 1:1
+hacia la esquina superior izquierda, mejor predice el modelo la
+presencia/ausencia de una especie. Si tomamos una presencia aleatoria y
+una ausencia aleatoria de nuestras observaciones y hacemos predicciones,
+el AUC puede interpretarse como la probabilidad de asignar una
+probabilidad de ocurrencia predicha más alta al punto de presencia que
+al de ausencia. 
+
+Normalmente, consideramos que un AUC \> 0,7 indica que las predicciones son correctas ([Araujo et al. 2005](https://onlinelibrary.wiley.com/doi/full/10.1111/j.1365-2486.2005.01000.x)).
+
+El objeto `glm_eval`, nos muestra la calidad de la evaluación. Sin
+embargo, el modelo que generamos nos entrega valores continuos como
+predictores (i.e. la probabilidad de ocurrencia). Por eso necesitamos
+encontrar un umbral para decidir donde ocurre realmente la especie.
+
+### 2.2) Seleccion de Umbral
+
+```{r}
+# Use testing data for model evaluation
+glm_eval <- pa_evaluate(p = testing[testing$presencias == 1, ],
+                        a = testing[testing$presencias == 0, ],
+                        model = modelo_glm,
+                        type = "response")
+
+# posibles umbrales 
+glm_eval@thresholds %>% view()
+```
+
+Entonces, con la función `pa_evaluate()`, le pasamos datos que "sabemos"
+cuál debería ser la respuesta correcta para estos cálculos de
+probabilidad. Es decir, el modelo `modelo_glm` debería predecir valores
+cercanos a `1` para aquellas filas que pasemos al argumento `p` (porque
+sabemos que los tricahues se dan en esos lugares) y debería predecir
+valores cercanos a 0 para aquellas filas que pasemos al argumento `a`.
+Utilizamos esta información sobre el rendimiento del modelo para
+determinar el valor de probabilidad que se utilizará como límite para
+decir si una ubicación concreta es adecuada o inadecuada para los
+tricahues.
+
+El elemento thresholds de `glm_eval` guarda la información que nos
+permite determinar el umbral de corte. Aquí elegimos `max_spec_sens`,
+que establece "*el umbral en el que la suma de la sensibilidad (tasa de
+verdaderos positivos) y la especificidad (tasa de verdaderos negativos)
+es más alta*". Para más información, consulte la documentación de la
+función `pa_evaluate()`.
+
+Podemos usar distintos umbrales para definir presencias. Algunos de estos son:
+
+-   kappa: *el umbral en el que kappa es mayor*
+-   no_omission: *el umbral más alto en el que no hay omisión*
+-   prevalence : *la prevalencia modelizada es la más cercana a la
+    prevalencia observada*
+-   equal_sens_spec : *equal sensitivity and specificity*
+-   max_spec_sens: *el umbral en el que la suma de la sensibilidad (tasa
+    de verdaderos positivos) y la especificidad (tasa de verdaderos
+    negativos) es mayor*
+
+Una vez definido ese umbral, podemos mirar el AUC, o área bajo la
+curva. Como sabemos, un `AUC=0.5`, nos dice que el modelo se comporta
+igual que si hubieramos elegido variables por simple azar, cuando
+`AUC=1.0`, la predicción es perfecta (y poco creible, probablemente
+sobre-ajustada).
+
+```{r}
+plot(glm_eval, 'ROC')  
+```
+
+Binarizar las predicciones con el umbral seleccionado:    
+
+```{r}
+glm_threshold <- glm_eval@thresholds$max_spec_sens
+
+plot(predictions > glm_threshold)
+```
+
+### 2.3) Matriz de confusión para un threshold
+
+Pese a que la función `pa_evaluate()` nos entrega una matriz de confusión, para simpleficar el analisis generaremos una matriz binaria ocupando el threshold que definido anteriormente. 
+
+```{r}
+# Predecir probabilidades sobre el set de validación
+probabilidades <- predict(modelo_glm, newdata = testing, type = "response")
+
+# Aplicar el umbral para convertir probabilidades en presencia/ausencia (0/1)
+predicciones <- ifelse(probabilidades >= glm_threshold, 1, 0)
+
+# Crear la matriz de confusión
+confusion <- table(Predicho = predicciones, Observado = testing$presencias)
+
+print(confusion)
+```
+
+
+## 3) Algebra de mapas en R
+
+No se relaciona con lo visto de ahora, pero el algebra de mapas puede ser util para poder compara distintas predicciones y thresholds.
+
+Esta se puede realizar mediante comparaciones logicas o algebraicas usando la libreía `terra`.
+
+```{r}
+# Comparar mapas raster con dos thresholds distintos
+glm_threshold1 <- glm_eval@thresholds$max_spec_sens
+glm_threshold2 <- glm_eval@thresholds$equal_sens_spec
+
+# ver diferencias entre las predicciones con dos thresholds distintos (resultado TRUE o FALSE)
+st = (predictions > glm_threshold1) != (predictions > glm_threshold2)
+
+plot(st)
+```
+
+```{r}
+# ver suma entre las predicciones con dos thresholds distintos
+st = (predictions > glm_threshold1) + (predictions > glm_threshold2)
+
+plot(st)
+```
+

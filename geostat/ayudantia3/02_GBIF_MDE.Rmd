@@ -52,7 +52,7 @@ pacman::p_load(
 
 options("kableExtra.html.bsTable" = T)
 
-#setwd(dirname(rstudioapi::getActiveDocumentContext()$path)) ##Cambiar de ser necesario
+setwd(dirname(rstudioapi::getActiveDocumentContext()$path)) ##Cambiar de ser necesario
 
 ```
 
@@ -94,6 +94,7 @@ Bioclim <- geodata::worldclim_country(c("Chile","Argentina"),
 names(Bioclim) <- sapply(strsplit(names(Bioclim), split='30s_', fixed=TRUE), function(x) (x[2])) # renombra columnas
 names(Bioclim) <- sapply(gsub('_','',names(Bioclim)), function(x) (x))
 
+#Bioclim = rast("Bioclim_raster.tif")
 
 plot(Bioclim)
 ```
@@ -112,16 +113,15 @@ podemos descargar datos modelados a futuro
 
 ```{r}
 # Bioclim_futuro <- geodata::cmip6_world(
-#   var = "bio",                # Variables bioclimáticas
-#   res = 0.5,                  # Resolución (en minutos: 10, 5, 2.5)
-#   ssp = "ssp245",             # Escenario: ssp126, ssp245, ssp370, ssp585
-#   model = "BCC-CSM2-MR",      # Modelo climático (hay muchos disponibles)
-#   time = "2041-2060",         # Periodo
-#   path = getwd()              # Carpeta de descarga
+#   var = "bio",
+#   ssp = "585",           # Escenario socioeconómico (SSP585)
+#   model = "MIROC6", # Modelo climático global
+#   time = "2061-2080",  # Periodo futuro
+#   res = 5,             # Resolución en minutos de arco
+#   path = getwd()   # Carpeta donde guardar los archivos
 # )
 # 
-# names(Bioclim_futuro) <- sapply(strsplit(names(Bioclim_futuro), split='30s_', fixed=TRUE), function(x) (x[2])) # renombra columnas
-# names(Bioclim_futuro) <- sapply(gsub('_','',names(Bioclim_futuro)), function(x) (x))
+# Bioclim_futuro <- Bioclim_futuro %>% crop(ext(Bioclim))
 # 
 # plot(Bioclim_futuro)
 ```
@@ -251,18 +251,24 @@ yo veo las variables :
 
 -   BIO1
 -   BIO5
--   BIO9
 -   BIO10
+-   BIO15
+-   BIO18
 
-(son todas de temperatura?.... mmmh sospechoso. Creo que será importante
-considerar directamente las variables climáticas.)
+¿por qué no las demás? ¿por qué no usar todas las variables? ¿por qué?
 
 ```{r sel-vars-bioclimaticas, echo=TRUE}
 ## ejemplo con algunas variables... que no son las correctas, pero muestra el procedimiento
 var_ambientales <- clima|>
-  dplyr::select(bio1,bio5,bio9,bio10)
+  dplyr::select(bio1,bio5,bio10,bio15,bio18)
 
-rm(clima) # borramos para aliviar la memoria del compu!
+# para norte y sur
+var_ambientales_sur <- climaS|>
+  dplyr::select(bio1,bio5,bio10,bio15,bio18)
+var_ambientales_norte <- climaN|>
+  dplyr::select(bio1,bio5,bio10,bio15,bio18)
+
+rm(clima, climaS, climaN) # borramos para aliviar la memoria del compu!
 ```
 
 ## 3: Guardamos los datos
@@ -278,12 +284,17 @@ sesion.
 
 ```{r}
 # escribir un raster al disco como .tif
-writeRaster(Bioclim, "Bioclim_raster.tif", overwrite=TRUE)
+writeRaster(Bioclim, "Bioclim_presente.tif", overwrite=TRUE)
+
+writeRaster(Bioclim_futuro, 'Bioclim_futuro.tif', overwrite=TRUE)
 
 # Variables ambientales seleccionadas
 write.csv(var_ambientales,"var_ambientales.csv")
+write.csv(var_ambientales_sur,"var_ambientales_sur.csv")
+write.csv(var_ambientales_norte,"var_ambientales_norte.csv")
 
-# Variables por grupo (opcional)
+
+# Todas las bioclim por grupo (opcional)
 # write.csv(Clima,"clima.csv")
 # write.csv(ClimaN,"climaN.csv")
 # write.csv(ClimaS,"climaS.csv")

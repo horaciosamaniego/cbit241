@@ -60,7 +60,7 @@ pacman::p_load(
 
 options("kableExtra.html.bsTable" = T)
 
-#setwd(dirname(rstudioapi::getActiveDocumentContext()$path)) ##Cambiar de ser necesario
+setwd(dirname(rstudioapi::getActiveDocumentContext()$path)) ##Cambiar de ser necesario
 
 ```
 
@@ -213,9 +213,12 @@ print(dim(cp$data)) # dimensiones del set de datos
 
 ```
 
-> En caso de que para su trabajo necesiten descargar volumenes de datos superiores a 100.000, la forma más robusta es usar occ_download(). Para implementarla es necesario tener una cuenta en GBif y usar el paquete `rgbif`.
+> En caso de que para su trabajo necesiten descargar volumenes de datos
+> superiores a 100.000, la forma más robusta es usar occ_download().
+> Para implementarla es necesario tener una cuenta en GBif y usar el
+> paquete `rgbif`.
 
->Un ejemplo sería:
+> Un ejemplo sería:
 
 ```{r}
 # library(rgbif)
@@ -235,7 +238,6 @@ print(dim(cp$data)) # dimensiones del set de datos
 # # Abrir archivo descargado
 # datos <- read.csv(unzip("xxx.zip", "occurrence.csv"))
 ```
-
 
 Al bajar los datos de GBIF, creamos el objeto `cp` que tiene los datos
 en `cp$data`.
