@@ -12,6 +12,7 @@ El estadígrafo usado es el *K*-Ripley que permite identificar si los elementos 
 2. Desagrupados, o en repulsión, y
 3. Distrtibuidos de forma azarosa. Los procesos son indiferentes a la ubicación de los "vecinos"
 
+[Ejemplo *K*-Ripley](https://github.com/horaciosamaniego/cbit241/blob/main/ejemplo_kriging.ipynb)
 
 ### Procesos de segundo orden
 
@@ -20,6 +21,7 @@ en estos casos, lo que interesa es el valor que adquiere el proceso en la locaci
 En este caso usamos 2 métodos para comprender la dependencia espacial de la variable *z*.
 
 **Autocorrelación**
-
+[Ejemplo autocorrelación](https://github.com/horaciosamaniego/cbit241/blob/main/crash_example_spatial_autocorrelation.ipynb)
 
 **Semivarianza**
+[Ejemplo semivarianza](https://github.com/horaciosamaniego/cbit241/blob/main/ejemplo_semivariograma.ipynb)
