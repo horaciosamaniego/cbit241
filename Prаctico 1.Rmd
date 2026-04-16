@@ -1,0 +1,235 @@
+---
+title: 'Práctico 1: Métricas del Paisaje'
+output:
+  pdf_document: default
+  html_document: default
+---
+
+# Métricas del Paisaje.
+
+Las métricas son una herramienta utilizada para la caracterización y cuantificación de patrones en un paisaje, obteniendo así el estado de este. Su uso proporciona información útil sobre la composición (tipos y abundancia de parches) o configuración (disposición espacial y características de los elementos) de un paisaje, como por ejemplo, la proporción de cada tipo de cobertura de suelo presente, o el tamaño o forma de sus elementos. Las métricas son valiosas dado que permiten comparar diferentes configuraciones de paisaje, ya sea analizando un mismo paisaje en diferentes momentos o comparando el mismo paisaje bajo diferentes escenarios. Por otro lado, los paisajes pueden ser analizados en tres niveles dependiendo del énfasis deseado: parche, clase y paisaje.
+
+# Actividad 1.
+
+Usaremos R como plataforma para ilustrar el cálculo de métricas del paisaje, ya que es un entorno y lenguaje de programación con un enfoque al análisis estadístico que nos permitirá hacer los análisis numéricos que requeriremos para estudiar el paisaje en términos de métricas.
+
+En primer lugar, es necesario instalar paquetes o “packages” de herramientas hechas por la comunidad. En este caso, deberán instalar (función install) y cargar la librería landscapemetrics (función library), pues incorpora una serie de índices equivalentes a los calculados por el programa especializado en Ecología del Paisaje (Fragstat).
+
+```{r message=FALSE, warning=FALSE}
+
+require(pacman)
+pacman::p_load(landscapemetrics, 
+               terra,
+               sf,
+               tidyverse
+               )
+```
+
+Recuerda seleccionar el espacio de trabajo con el comando a través de la pestaña Session en RStudio.
+
+# Preparación de datos.
+
+Para el práctico, necesitaremos descargar algunos insumos: - Mapas vectoriales de Chile [Aquí](https://www.bcn.cl/siit/mapas_vectoriales/index_html). - Raster de cobertura de usos de suelo para Chile [disponible aqui](http://www.gep.uchile.cl/Landcover_CHILE.html).
+
+Luego de descargar los datos y descomprimirlos en nuestro directorio de trabajo podemos "cargar" el archivo TIF como un objeto en \`R.
+
+```{r}
+chiler <- terra::rast("LC_CHILE_2014_b.tif")
+```
+
+Miremos la descripcion del archivo, fijemosnos en qué sistema de coordenadas está.
+
+```{r}
+chiler
+```
+
+Vemos que sus coordenadas están definidas en UTM 19S.
+
+Podemos también ver los datos con `plot()`.
+
+```{r}
+plot(chiler,main="Usos de suelo")
+```
+
+Usaremos la comuna de Río Bueno para analizar los usos de suelo. Al igual que con el archivo de usos de suelo, debemos "cargar" el archivo con la comuna como un objeto en R. "Río Bueno" es una cobertura en formato `shp` de la comuna homónima.
+
+```{r}
+Río_Bueno = sf::st_read("Río Bueno.shp") |>
+  sf::st_transform(crs=32719)
+
+plot(Río_Bueno["Comuna"], axes = TRUE, graticule = TRUE)
+```
+
+# Reclasificación de usos.
+
+Para conocer los usos en la comuna de Río Bueno, debemos recortar el raster con el polígono reproyectado para trabajar unicamente con el área de interes. Para eso, usamos funciones de la librería `terra`. La función `crop` recorta a la extensión de *chiler*, pero solamente puede recortar coberturas de tipo raster en formas rectangulares, pues estamos tratando con una matriz (!). Para eliminar todo lo que no está en nuestro polígono de referencia usamos `mask`, lo que va a *enmascarar* lo que no está en nuestro polígono de referencia. Finalmente, `trim` elimina columnas, o filas, que solo tengan `NaN`.
+
+```{r}
+Usos <- terra::crop(chiler,vect(Río_Bueno)) |>
+  terra::mask(vect(Río_Bueno))
+
+terra::trim(Usos)
+```
+
+```{r}
+plot(Usos, axes = FALSE,mar=c(2,2,2,6))
+```
+
+Ahora, vamos a ver qué clases de usos existen en la comuna de Río Bueno. Ver equivalencia en [documentación](http://www.gep.uchile.cl/Landcover/Landcover%20de%20Chile%20-%20Descripci%C3%B3n%20del%20Producto%20-%20GEP%20UCHILE%202016.pdf).
+
+```{r}
+print(sort(unique(values(Usos))))
+
+print(length(unique(values(Usos))))
+```
+
+Si bien ya conocemos la cantidad y cuales son los usos de suelo en la comuna de Río Buneo, es mas informativo ver la frecuencia de cada uso con un gráfico de barras
+
+```{r warning=FALSE}
+barplot(Usos,main='Número de pixeles por clase',horiz=TRUE,las=1)
+```
+
+O también, podemos analizar los usos de acuerdo a su superficie.
+
+```{r}
+has=  data.frame(table(values(Usos))*900/10000)
+npix = data.frame(table(values(Usos)))
+
+df <- data.frame(Categoria=has$Var1, Hectáreas=has$Freq, Pixeles=npix$Freq)
+print(df)
+```
+
+Para simplificar el análisis, necesitamos reclasificar los Usos de Suelos (Land Covers). Para esto, nos basaremos en las clases de nivel 1 de la Tabla 1 (ver [documentación](http://www.gep.uchile.cl/Landcover/Landcover%20de%20Chile%20-%20Descripci%C3%B3n%20del%20Producto%20-%20GEP%20UCHILE%202016.pdf)), excepto para la clase "Bosques", que diferenciaremos según bosque nativo y plantaciones. Para esto, debemos generar una tabla con los valores de reclasificación.
+
+```{r}
+clases_usos <- c("Cultivos", "Bosque Nativo", "Plantaciones", "Pastizales", "Matorrales", "Humedales", "Cuerpos de Agua", "Superficies Impermeables","Tierras Desnudas" ,"Otros") 
+
+reclass <- c(
+  -Inf,1,NaN, #0
+  100, 151, 0, #1 Cultivos
+  200, 233, 1, #2 Bosque Nativo
+  240, 253, 2, #3 Plantación
+  300, 331, 3, #4 Pastizales
+  400, 451, 4, #5 Matorrales
+  500, 531, 5, #6 Humedales
+  600, 641, 6, #7 Cuerpos de Agua
+  799, 801, 7, #8 Superficies Impermeables
+  900, 933, 8, #9 Tierras Desnudas
+  1000, 1211, 9) #10 Otros
+  
+reclass_m <- matrix(reclass, ncol=3, byrow=TRUE)
+
+Usos2 <- terra::classify(Usos, reclass_m, right = TRUE, others = NaN)
+id_cl <- sort(unique(values(Usos2)))
+clases_usos <- clases_usos[1:length(id_cl)]
+
+LU <- data.frame(id = id_cl, Usos = clases_usos)
+levels(Usos2) = data_frame(usos=0:9,clases = clases_usos)
+
+
+#LU <- data.frame(id = id_cl, Usos = clases_usos[id_cl])
+#levels(Usos2) = Usos # establece los valores del raster como categórico, como clases
+
+```
+
+Luego, vamos a visualizar el raster reclasificado.
+
+```{r}
+colores = c(
+  "yellow4", #cultivo
+  "green4", # BN
+  "red", #Plantacionies
+  "khaki2", # pastizal
+  "darkorange4", # matorral
+  "skyblue2", # humedal
+  "blue1", #h20
+  "steelblue4", #sup impermeables
+  "gray70"
+  )
+
+plot(Usos2, type="classes", col=colores, main = "Rio Bueno", axes=F, mar=c(1,1,2,9.4),legend=T)
+
+```
+
+# Cálculo de Métricas de paisaje
+
+Para aplicar el cálculo de métricas de paisajes, necesitamos que el tamaño de las celdas del archivo raster sean iguales (en alto y ancho). Desafortunadamente, algo sucede en el archivo original que deja las celdas levemente desigual. Si tipiamos el comando `> res(Usos2)` vamos a ver que la resolución es de `30.00002, 29.99993  (x, y)`. Si, eso está en unidades de metros, por lo que la diferencia es milimétrica! Lo vamos a corregir.
+
+Para corregir eso, usaremos el comando `warp()`. Lo haremos en 2 pasos: 1) Generamos un raster *vacío* de las mismas dimensiones, proyección y con resolución de 30m; y luego, 2) "Resampleamos". Es decir vamos a remuestrear este nuevo raster con los valores de archivo original.
+
+```{r}
+# Generamos nuevo raster vacio con solo NAs
+tmp <- terra::rast(nrows=dim(Usos2)[1], ncols=dim(Usos2)[2], nlyrs=1, xmin=ext(Usos2)[1], xmax=ext(Usos2)[2], ymin=ext(Usos2)[3],ymax=ext(Usos2)[4], crs = crs(Usos2), resolution=30.0000000, vals=NA)
+# Remuestreamos con raster original
+Usosr <- resample(Usos2,tmp,method="cubic")
+Usosr
+
+
+```
+
+Usaremos la librería descrita en la siguiente publicación:
+
+-   Hesselbarth, M.H.K., Sciaini, M., With, K.A., Wiegand, K., Nowosad, J. 2019. landscapemetrics: an open‐source R tool to calculate landscape metrics. Ecography, 42: 1648-1657 ([paper](https://sci-hub.se/10.1111/ecog.04617))
+
+Según la documentación de la libreria `lansdcapemetrics` [aquí](https://r-spatialecology.github.io/landscapemetrics/index.html), el raster debe contener números enteros. Para eso debemos hacer unas correcciones mas.
+
+```{r include=FALSE}
+# ver si son enteros
+#unique(values(Usosr))
+# como no lo son, transformarlos
+values(Usosr) = as.integer(values(Usosr))
+#volver a chequear...
+unique(values(Usosr))
+```
+
+Luego, la libreria (y el paper) nos indica que debemos validar el paisaje para la aplicación de métricas.
+
+```{r}
+check_landscape(Usosr)
+```
+
+En la validación, nos entregan información básica del raster, si está proyectado, si las clases han sido codificadas con números enteros y el número de categorías que contiene. Aqui vemos que si debiera estar en condiciones para poder evaluar métricas.
+
+Ahora, podemos calcular todas las métricas disponibles para la zona de estudio a nivel de paisaje.
+
+```{r}
+riobueno_l <- calculate_lsm(Usosr,level="landscape",full_name = TRUE)
+riobueno_l
+```
+
+¿Qué nos muestra la tabla?
+
+Por otro lado, podemos podemos preguntarnos también por la proporción del paisaje utilizada por cada clase. Recordemos que al evaluar métricas por clase, se produce una matriz de resultados que contiene una fila por clase. ¿Porqué hay 550 filas aquí?
+
+```{r}
+riobueno_c <- calculate_lsm(Usosr,level="class",full_name = T)
+```
+
+```{r}
+riobueno_c
+```
+
+O también, calcular un tipo de métrica para un solo nivel.
+
+```{r}
+iforma_c = lsm_c_ca(Usos2)
+iforma_c
+```
+
+```{r}
+area_p = lsm_p_shape(Usosr)
+area_p
+```
+
+Finalmente podemos no solo obtener un resumen de los valores en una tabla, sino que podemos volver a los datos originales y ver como se distribuyen.
+
+```{r}
+barplot(Usosr,main='Número de pixeles por clase',horiz=TRUE,las=1)
+```
+
+```{r}
+library(ggplot2)
+par(mfrow=c(2,2))
+hist(log10(iforma_p$value[which(iforma_p$class==1)]),main="Bosque Nativo",xlab="Índice de forma",prob=F)
+hist(log10(iforma_p$value[which(iforma_p$class==2)]),main="Plantación",xlab="Índice de forma")
+```
